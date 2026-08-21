@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Mic, Settings2, X } from 'lucide-react'
-import { LiveVoice, type Phase, type Timings } from '../../lib/liveVoice'
+import { LiveVoice, type Phase } from '../../lib/liveVoice'
 import { SPEAKERS } from '../../lib/speakers'
 import { Button, Portal, cx } from '../../ui'
 
@@ -44,7 +44,6 @@ export function VoiceOverlay({ onClose }: { onClose: () => void }) {
   const [partial, setPartial] = useState('')
   const [heard, setHeard] = useState('')
   const [reply, setReply] = useState('')
-  const [timings, setTimings] = useState<Timings>({})
   const [error, setError] = useState<string | null>(null)
   const [speaker, setSpeaker] = useState(
     (import.meta.env.VITE_SARVAM_SPEAKER as string) ?? 'dev')
@@ -64,14 +63,17 @@ export function VoiceOverlay({ onClose }: { onClose: () => void }) {
   useEffect(() => stop, [stop])
 
   const start = useCallback(async () => {
-    setError(null); setPartial(''); setHeard(''); setReply(''); setTimings({})
+    setError(null); setPartial(''); setHeard(''); setReply('')
     const lv = new LiveVoice({
       onPhase: p => { setPhase(p); if (p === 'listening') setPartial('') },
       onLevel: setLevel,
       onPartial: setPartial,
       onFinal: t => { setHeard(t); setPartial(''); setReply('') },
       onReplyToken: setReply,
-      onTimings: setTimings,
+      // Required by the engine, deliberately unused: the numbers are
+      // instrumentation, and this is the assistant's screen rather than a
+      // benchmark. Re-add a readout here if voice ever feels slow.
+      onTimings: () => {},
       onError: setError,
     }, undefined, speaker)
     engine.current = lv
@@ -229,15 +231,6 @@ export function VoiceOverlay({ onClose }: { onClose: () => void }) {
       {/* ── footer ──────────────────────────────────────────────────── */}
       <footer className="px-6 pb-8 pt-2 text-center"
               style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 2rem)' }}>
-        {/* Latency, shown only once a turn has completed. Kept because it is the
-            single most useful number when voice feels wrong, and because "first
-            word" is the only figure that describes what the user waited for. */}
-        {timings.audioMs !== undefined && (
-          <div className="mb-3 text-[11px] tabular-nums" style={{ color: 'var(--text-subtle)' }}>
-            first word in {(timings.audioMs / 1000).toFixed(1)}s
-            {timings.tool && ' · ran a tool'}
-          </div>
-        )}
         {!live
           ? <Button variant="primary" onClick={() => void start()}>Start talking</Button>
           : <Button onClick={() => { stop(); setPhase('idle') }}>End</Button>}

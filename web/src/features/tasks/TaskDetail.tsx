@@ -160,20 +160,27 @@ export function TaskDetail({ task, onClose, onChanged }: {
     }
   }, [task.id, onChanged, onClose])
 
-  // Each row says whether its value may be capitalised. A blanket `capitalize`
-  // class turned "6:00 pm" into "6:00 Pm" — CSS capitalises the first letter of
-  // EVERY word, so it reaches inside a formatted time and a filename too. Only the
-  // enum-ish values want it.
-  const details = useMemo(() => [
-    ['Status', STATUS_LABEL[task.status] ?? task.status, false],
-    ['Priority', task.priority, true],
-    ['Due', due ? dueLabel(due) : 'No time set', false],
-    ['Created', task.created_at ? messageTime(task.created_at) : '—', false],
-    ...(task.completed_at ? [['Completed', messageTime(task.completed_at), false]] : []),
-    ...(task.owner_name ? [['Created by', task.owner_name, false]] : []),
-    ...(task.subtask_count ? [['Sub-tasks', String(task.subtask_count), false]] : []),
-    ['Task ID', `#${task.id}`, false],
-  ] as [string, string, boolean][], [task, due])
+  /**
+   * ONLY what is not already on screen.
+   *
+   * This block used to list Status, Priority and Due — all three of which are
+   * already a badge, a badge and the line under the title. So it restated three
+   * things you could see and added `Task ID #2550`, a database primary key with no
+   * meaning to anyone reading it. A details panel that repeats the header is not
+   * extra information, it is noise that makes the real detail harder to find.
+   *
+   * What survives is the provenance a task card cannot show: when it was made, who
+   * made it, whether it has children. If none of that is known the block hides
+   * entirely rather than rendering a table of dashes.
+   */
+  const details = useMemo(() => ([
+    ...(task.created_at ? [['Created', messageTime(task.created_at)]] : []),
+    ...(task.completed_at ? [['Completed', messageTime(task.completed_at)]] : []),
+    // Only worth saying when it was somebody else — "created by you" on your own
+    // task is a fact you supplied.
+    ...(task.owner_name && !task.is_mine ? [['Created by', task.owner_name]] : []),
+    ...(task.subtask_count ? [['Sub-tasks', String(task.subtask_count)]] : []),
+  ] as [string, string][]), [task])
 
   const canSend = (!!draft.trim() || staged.length > 0) && !uploading.length
 
@@ -226,23 +233,28 @@ export function TaskDetail({ task, onClose, onChanged }: {
           )}
 
           {/* ── details, collapsed ──────────────────────────────────── */}
-          <button onClick={() => setShowDetails(v => !v)}
-                  aria-expanded={showDetails}
-                  className="mt-3.5 flex items-center gap-1.5 rounded-lg px-2 py-1 text-[12px] font-medium"
-                  style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
-            Task details
-            <ChevronDown className={cx('size-3.5 transition-transform', showDetails && 'rotate-180')} />
-          </button>
-          {showDetails && (
-            <dl className="fade mt-2.5 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-xl p-3.5"
-                style={{ background: 'var(--bg-sunken)' }}>
-              {details.map(([k, v, cap]) => (
-                <div key={k} className="contents">
-                  <dt className="text-[12px]" style={{ color: 'var(--text-subtle)' }}>{k}</dt>
-                  <dd className={cx('text-[12px] font-medium', cap && 'capitalize')}>{v}</dd>
-                </div>
-              ))}
-            </dl>
+          {details.length > 0 && (
+            <>
+              <button onClick={() => setShowDetails(v => !v)}
+                      aria-expanded={showDetails}
+                      className="mt-3.5 flex items-center gap-1 text-[12px] font-medium"
+                      style={{ color: 'var(--text-subtle)' }}>
+                {showDetails ? 'Hide' : 'Details'}
+                <ChevronDown className={cx('size-3.5 transition-transform',
+                                           showDetails && 'rotate-180')} />
+              </button>
+              {showDetails && (
+                <dl className="fade mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+                  {details.map(([k, v]) => (
+                    <div key={k} className="contents">
+                      <dt className="text-[12px]" style={{ color: 'var(--text-subtle)' }}>{k}</dt>
+                      {/* No `capitalize` anywhere near a formatted value. */}
+                      <dd className="text-[12px]">{v}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+            </>
           )}
 
           {/* ── who is on it ────────────────────────────────────────── */}
