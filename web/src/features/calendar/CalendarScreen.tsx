@@ -9,6 +9,8 @@ import {
   dayLabel, istDateKey, istNow, monthYearLabel, parseIstNaive, timeLabel,
 } from '../../lib/format'
 import type { Meeting, Task } from '../../lib/types'
+import { TaskDetail } from '../tasks/TaskDetail'
+import { MeetingDetail } from './MeetingDetail'
 import {
   Badge, Button, Card, EmptyState, ErrorState, Skeleton, cx,
 } from '../../ui'
@@ -38,6 +40,11 @@ export function CalendarScreen() {
   // and the agenda changes under you.
   const [monthAnchor, setMonthAnchor] = useState(() => startOfMonth(istNow()))
   const [selectedKey, setSelectedKey] = useState(() => istDateKey(istNow()))
+  // A row on the calendar was previously inert, so there was no way to reach a
+  // task's description, comments or files from here at all — the calendar showed
+  // that something existed and then refused to open it.
+  const [openTask, setOpenTask] = useState<Task | null>(null)
+  const [openMeeting, setOpenMeeting] = useState<Meeting | null>(null)
 
   const m = useApi(s => meetingsApi.all(s), [], 'meetings:all')
   const t = useApi(s => tasksApi.mine(s), [], 'tasks:mine')
@@ -197,9 +204,20 @@ export function CalendarScreen() {
       <div className="space-y-2">
         {dayRows.map(row => row.kind === 'meeting'
           ? <MeetingCard key={`m${row.meeting.id}`} meeting={row.meeting}
-                         at={row.at} end={row.end} />
-          : <TaskRow key={`t${row.task.id}`} task={row.task} at={row.at} />)}
+                         at={row.at} end={row.end}
+                         onOpen={() => setOpenMeeting(row.meeting)} />
+          : <TaskRow key={`t${row.task.id}`} task={row.task} at={row.at}
+                     onOpen={() => setOpenTask(row.task)} />)}
       </div>
+
+      {openTask && (
+        <TaskDetail task={openTask} onClose={() => setOpenTask(null)}
+                    onChanged={() => { t.reload(); m.reload() }} />
+      )}
+      {openMeeting && (
+        <MeetingDetail meeting={openMeeting} onClose={() => setOpenMeeting(null)}
+                       onChanged={() => { m.reload(); t.reload() }} />
+      )}
     </div>
   )
 }
@@ -245,15 +263,15 @@ function Dots({ bag, inverted }: {
   )
 }
 
-function MeetingCard({ meeting, at, end }: {
-  meeting: Meeting; at: Date | null; end: Date | null
+function MeetingCard({ meeting, at, end, onOpen }: {
+  meeting: Meeting; at: Date | null; end: Date | null; onOpen: () => void
 }) {
   const now = istNow()
   const live = !!at && !!end && at <= now && now <= end
   const past = !!end && end < now
   return (
-    <Card className={cx(past && 'opacity-60')}>
-      <div className="flex gap-3.5 p-3.5">
+    <Card className={cx('transition hover:brightness-[.98]', past && 'opacity-60')}>
+      <button onClick={onOpen} className="flex w-full gap-3.5 p-3.5 text-left">
         <div className="w-[64px] shrink-0 text-right">
           <div className="text-[13px] font-semibold tabular-nums">{at ? timeLabel(at) : '—'}</div>
           {end && (
@@ -283,16 +301,18 @@ function MeetingCard({ meeting, at, end }: {
             )}
           </div>
         </div>
-      </div>
+      </button>
     </Card>
   )
 }
 
-function TaskRow({ task, at }: { task: Task; at: Date | null }) {
+function TaskRow({ task, at, onOpen }: {
+  task: Task; at: Date | null; onOpen: () => void
+}) {
   const done = task.status === 'completed'
   return (
-    <Card className={cx(done && 'opacity-55')}>
-      <div className="flex gap-3.5 p-3.5">
+    <Card className={cx('transition hover:brightness-[.98]', done && 'opacity-55')}>
+      <button onClick={onOpen} className="flex w-full gap-3.5 p-3.5 text-left">
         <div className="w-[64px] shrink-0 text-right text-[13px] font-semibold tabular-nums">
           {at ? timeLabel(at) : '—'}
         </div>
@@ -307,7 +327,7 @@ function TaskRow({ task, at }: { task: Task; at: Date | null }) {
             {task.is_overdue && <Badge tone="overdue">Overdue</Badge>}
           </div>
         </div>
-      </div>
+      </button>
     </Card>
   )
 }

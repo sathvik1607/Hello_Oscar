@@ -12,6 +12,7 @@ import { completedToday, todayTimeline } from '../tasks/buckets'
 import { TaskCard } from '../tasks/TaskCard'
 import { useTaskActions } from '../tasks/useTaskActions'
 import { TaskDetail } from '../tasks/TaskDetail'
+import { MeetingDetail } from '../calendar/MeetingDetail'
 import { useVoice } from '../voice/VoiceProvider'
 import {
   Button, Card, EmptyState, ErrorState, SectionHeading, Skeleton, cx,
@@ -35,6 +36,7 @@ import {
 export function TodayScreen() {
   const user = getUser()
   const [openTask, setOpenTask] = useState<Task | null>(null)
+  const [openMeeting, setOpenMeeting] = useState<Meeting | null>(null)
   const { openVoice } = useVoice()
 
   const t = useApi(s => tasksApi.mine(s), [], 'tasks:mine')
@@ -133,7 +135,9 @@ export function TodayScreen() {
         <section>
           <SectionHeading count={todaysMeetings.length}>Meetings</SectionHeading>
           <div className="space-y-2">
-            {todaysMeetings.map(x => <MeetingRow key={x.id} meeting={x} />)}
+            {todaysMeetings.map(x => (
+              <MeetingRow key={x.id} meeting={x} onOpen={() => setOpenMeeting(x)} />
+            ))}
           </div>
         </section>
       )}
@@ -193,6 +197,10 @@ export function TodayScreen() {
           onChanged={t.reload}
         />
       )}
+      {openMeeting && (
+        <MeetingDetail meeting={openMeeting} onClose={() => setOpenMeeting(null)}
+                       onChanged={() => { m.reload(); t.reload() }} />
+      )}
     </div>
   )
 }
@@ -212,7 +220,7 @@ function Pill({ icon, label, value, tone }: {
   )
 }
 
-function MeetingRow({ meeting }: { meeting: Meeting }) {
+function MeetingRow({ meeting, onOpen }: { meeting: Meeting; onOpen: () => void }) {
   const at = parseIstNaive(meeting.scheduled_at)
   const ends = parseIstNaive(meeting.ends_at)
   const now = istNow()
@@ -221,7 +229,7 @@ function MeetingRow({ meeting }: { meeting: Meeting }) {
   return (
     <Card className={cx(live && 'ring-2')}
           style={live ? { boxShadow: '0 0 0 2px rgba(34,197,94,.35)' } : undefined}>
-      <div className="flex items-center gap-3.5 p-3.5">
+      <button onClick={onOpen} className="flex w-full items-center gap-3.5 p-3.5 text-left">
         <div className="w-[62px] shrink-0 text-right">
           <div className="text-[13px] font-semibold tabular-nums">
             {at ? timeLabel(at) : '—'}
@@ -239,7 +247,7 @@ function MeetingRow({ meeting }: { meeting: Meeting }) {
             {live ? 'Happening now' : meeting.location || 'No location'}
           </div>
         </div>
-      </div>
+      </button>
     </Card>
   )
 }
