@@ -9,7 +9,7 @@
 set -uo pipefail
 
 BASE="${BASE:-http://127.0.0.1:8099}"
-JQ="$JQ"
+JQ="$(dirname "$0")/jqp"
 PASS=0; FAIL=0
 
 ok()   { printf '  \033[32mok\033[0m   %s\n' "$1"; PASS=$((PASS+1)); }
