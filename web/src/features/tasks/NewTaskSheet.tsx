@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { ApiError, tasks as tasksApi } from '../../lib/api'
 import { istDateKey, istNow } from '../../lib/format'
-import { Button, Field, IconButton, cx, inputCls, inputStyle } from '../../ui'
+import { Button, Field, IconButton, Portal, cx, inputCls, inputStyle } from '../../ui'
 
 /**
  * Create a task by hand.
@@ -61,7 +61,7 @@ export function NewTaskSheet({ onClose, onCreated }: {
   }
 
   return (
-    <>
+    <Portal>
       <button aria-label="Close" onClick={onClose}
               className="fade fixed inset-0 z-40 bg-black/30" />
       <div
@@ -140,7 +140,7 @@ export function NewTaskSheet({ onClose, onCreated }: {
           </div>
         </form>
       </div>
-    </>
+    </Portal>
   )
 }
 

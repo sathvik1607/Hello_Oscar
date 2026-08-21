@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Mic, Settings2, X } from 'lucide-react'
 import { LiveVoice, type Phase, type Timings } from '../../lib/liveVoice'
 import { SPEAKERS } from '../../lib/speakers'
-import { Button, cx } from '../../ui'
+import { Button, Portal, cx } from '../../ui'
 
 /**
  * Full-screen voice. The one surface where Oscar is the product rather than a
@@ -108,7 +108,8 @@ export function VoiceOverlay({ onClose }: { onClose: () => void }) {
   const scale = phase === 'listening' ? 1 + Math.min(level * 5.5, 0.4) : 1
 
   return (
-    <div
+    <Portal>
+      <div
       className="fade fixed inset-0 z-[60] flex flex-col"
       style={{ background: 'var(--bg)' }}
       role="dialog" aria-modal="true" aria-label="Talk to Oscar"
@@ -248,5 +249,6 @@ export function VoiceOverlay({ onClose }: { onClose: () => void }) {
         </p>
       </footer>
     </div>
+    </Portal>
   )
 }

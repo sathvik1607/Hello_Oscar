@@ -15,8 +15,8 @@
 
 import { getBase, getToken, requireUserId, signOut } from './session'
 import type {
-  AppNotification, BusinessProfile, ChatMessage, ChatSession, LoginResponse,
-  Meeting, Note, PlanDayResponse, Task, TaskComment, TeamMember,
+  AppNotification, BusinessProfile, ChatMessage, ChatSession, CommentAttachment,
+  LoginResponse, Meeting, Note, PlanDayResponse, Task, TaskComment, TeamMember,
 } from './types'
 
 export class ApiError extends Error {
@@ -95,9 +95,46 @@ async function request<T>(path: string, opts: Opts = {}): Promise<T> {
   return (text ? JSON.parse(text) : null) as T
 }
 
-/** Attachment and image URLs come back RELATIVE so they survive a public/presigned
- *  flip. Resolve them for rendering, and prefer a direct_url when the caller has one. */
-export const assetUrl = (relative: string) => getBase() + relative
+/**
+ * Turn an attachment into something a browser can actually open.
+ *
+ * 🔴 The relative route CANNOT be used as an `<a href>` or `<img src>`. It is
+ * `/tasks/attachments/{id}?user_id=…`, which the auth middleware treats as a
+ * user-scoped request — and markup cannot send an Authorization header, so the
+ * browser gets 401. Measured: 401 without the token, 302 with it.
+ *
+ * So there are two paths and the choice is not cosmetic:
+ *
+ *  · `direct_url` — a permanent public S3 link, non-null while the bucket serves
+ *    anonymous reads on `tasks/*`. No auth involved, immutable (uuid key), safe to
+ *    put straight in an href. This is the fast path and the common case today.
+ *
+ *  · otherwise — fetch it through the API WITH the token and hand back a blob URL.
+ *    Costs a round trip and some memory, and is the only thing that works when the
+ *    bucket is private.
+ *
+ * Returning a dead href when `direct_url` is null (which is what `direct_url ??
+ * undefined` does) renders a file that looks downloadable and silently is not.
+ */
+export async function attachmentHref(a: {
+  id: number; direct_url: string | null; url: string
+}): Promise<{ href: string; revoke?: () => void }> {
+  if (a.direct_url) return { href: a.direct_url }
+  const res = await fetch(`${getBase()}${a.url}?user_id=${requireUserId()}`, {
+    headers: { Authorization: `Bearer ${getToken() ?? ''}` },
+  })
+  if (!res.ok) throw new ApiError(res.status, `Could not open that file (${res.status}).`)
+  const blob = await res.blob()
+  const href = URL.createObjectURL(blob)
+  // The caller MUST revoke this — a blob URL pins the whole file in memory until
+  // the document is discarded, and a thread with ten attachments would hold all ten.
+  return { href, revoke: () => URL.revokeObjectURL(href) }
+}
+
+/** Same rule for a thumbnail: the direct link or nothing. A thumbnail is decoration,
+ *  so it is not worth an authenticated round trip and a blob per row. */
+export const thumbHref = (a: { thumbnail_direct_url: string | null }) =>
+  a.thumbnail_direct_url ?? null
 
 // ── auth (the only calls made while signed out) ───────────────────────────────
 
@@ -168,6 +205,27 @@ export const tasks = {
   comments: (taskId: number, signal?: AbortSignal) =>
     request<{ task_id: number; comments: TaskComment[] }>(
       `/users/${requireUserId()}/tasks/${taskId}/comments`, { signal }),
+
+  /** Multipart, so it bypasses request(): setting Content-Type by hand on a
+   *  FormData body strips the boundary and the server sees a malformed part.
+   *  Two-phase like chat images — upload first (comment_id stays NULL), then post
+   *  the comment with the returned ids. 25 MB cap, enforced server-side. */
+  uploadAttachment: async (taskId: number, file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    const res = await fetch(
+      `${getBase()}/users/${requireUserId()}/tasks/${taskId}/attachments`,
+      { method: 'POST', headers: { Authorization: `Bearer ${getToken() ?? ''}` }, body: fd })
+    if (!res.ok) {
+      let detail = `Upload failed (${res.status}).`
+      try {
+        const j = await res.json()
+        if (j?.detail) detail = typeof j.detail === 'string' ? j.detail : detail
+      } catch { /* keep the status line */ }
+      throw new ApiError(res.status, detail)
+    }
+    return res.json() as Promise<CommentAttachment>
+  },
 
   comment: (taskId: number, body: string, attachment_ids?: number[]) =>
     request<{ task_id: number; comments: TaskComment[] }>(

@@ -104,9 +104,16 @@ export type TaskComment = {
 
 export type CommentAttachment = {
   id: number
+  /** NULL until the comment is posted — the two-phase link. A row with a null
+   *  comment_id is a normal state (uploaded while still typing), not corruption. */
+  comment_id: number | null
   file_name: string | null
   mime_type: string
+  /** 'image' | 'document' — decides whether a preview is even possible. */
+  kind: string
+  is_image: boolean
   byte_size: number
+  /** PDFs only — the "4 pages" line. */
   page_count?: number | null
   /** Relative — resolve through the API base. */
   url: string

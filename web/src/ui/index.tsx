@@ -8,7 +8,9 @@
  * what stops the theme drifting out of sync one component at a time.
  */
 
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { AlertTriangle, Check, Loader2, WifiOff } from 'lucide-react'
 
 export const cx = (...c: (string | false | null | undefined)[]) =>
@@ -258,4 +260,46 @@ export function Confirmation({ children }: { children: ReactNode }) {
       <Check className="size-3.5" /> {children}
     </div>
   )
+}
+
+// ── overlays ────────────────────────────────────────────────────────────────
+
+/**
+ * Render into `document.body` instead of where the JSX sits.
+ *
+ * 🔴 NOT optional for anything `position: fixed`. A transformed ancestor becomes
+ * the containing block for fixed descendants, so a sheet nested inside one anchors
+ * to that element rather than to the window — `inset-y-0 right-0` silently stops
+ * meaning "the right edge of the screen".
+ *
+ * That is exactly what happened: AppShell wraps every screen in `.rise`, which
+ * animates `transform`, so the task sheet laid out inside the content column at
+ * roughly a third of the viewport height. The width was right, which is what made
+ * it look like a styling mistake rather than a positioning one.
+ *
+ * A portal removes the whole class of bug — `filter`, `backdrop-filter`,
+ * `will-change`, `contain` and `perspective` on ANY ancestor do the same thing, and
+ * this app uses several of them. Overlays should never be reachable by that.
+ */
+export function Portal({ children }: { children: ReactNode }) {
+  // Rendered on the client only. `document` does not exist during a prerender, and
+  // reading it at module scope would break any future static build.
+  const [host] = useState(() =>
+    typeof document === 'undefined' ? null : document.createElement('div'))
+
+  useEffect(() => {
+    if (!host) return
+    document.body.appendChild(host)
+    // While an overlay is open the page behind must not scroll — a modal you can
+    // scroll out from under is disorienting on a trackpad and broken on a phone.
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prev
+      host.remove()
+    }
+  }, [host])
+
+  if (!host) return null
+  return createPortal(children, host)
 }

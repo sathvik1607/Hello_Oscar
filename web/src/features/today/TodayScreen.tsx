@@ -100,15 +100,22 @@ export function TodayScreen() {
 
           {(timeline.length > 0 || done.length > 0 || todaysMeetings.length > 0) && (
             <div className="mt-5 flex flex-wrap gap-2">
-              <Pill icon={<Clock className="size-3.5" />} label="to do" value={timeline.length} />
+              {timeline.length > 0 && (
+                <Pill icon={<Clock className="size-3.5" />} label="to do"
+                      value={timeline.length} />
+              )}
               {overdueCount > 0 && (
                 <Pill icon={<Clock className="size-3.5" />} label="overdue"
                       value={overdueCount} tone="danger" />
               )}
-              <Pill icon={<CalendarClock className="size-3.5" />} label="meetings"
-                    value={todaysMeetings.length} />
-              <Pill icon={<CheckCircle2 className="size-3.5" />} label="done"
-                    value={done.length} tone="good" />
+              {todaysMeetings.length > 0 && (
+                <Pill icon={<CalendarClock className="size-3.5" />} label="meetings"
+                      value={todaysMeetings.length} />
+              )}
+              {done.length > 0 && (
+                <Pill icon={<CheckCircle2 className="size-3.5" />} label="done"
+                      value={done.length} tone="good" />
+              )}
             </div>
           )}
         </div>
@@ -256,7 +263,12 @@ function brief(open: number, overdue: number, meets: number, done: number,
   }
   if (open - overdue > 0) {
     const n = open - overdue
-    parts.push(`${n} more due today`)
+    // "more" only reads correctly as a continuation of the overdue clause above.
+    // On its own it answers "more than what?" with nothing — which is how the first
+    // version produced the sentence "1 more due today." to someone with one task.
+    parts.push(overdue > 0
+      ? `${n} more due today`
+      : `${n} ${n === 1 ? 'task is' : 'tasks are'} due today`)
   }
   if (meets > 0) parts.push(`${meets} ${meets === 1 ? 'meeting' : 'meetings'}`)
 

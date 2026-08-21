@@ -5,8 +5,8 @@ import { useApi } from '../../lib/useApi'
 import { messageTime } from '../../lib/format'
 import type { Note } from '../../lib/types'
 import {
-  Button, Card, Confirmation, EmptyState, ErrorState, IconButton, Skeleton, cx,
-  inputCls, inputStyle,
+  Button, Card, Confirmation, EmptyState, ErrorState, IconButton, Portal, Skeleton,
+  cx, inputCls, inputStyle,
 } from '../../ui'
 
 /**
@@ -162,7 +162,7 @@ function NoteEditor({ note, onClose, onSaved }: {
   }
 
   return (
-    <>
+    <Portal>
       <button aria-label="Close" onClick={onClose}
               className="fade fixed inset-0 z-40 bg-black/30" />
       <div role="dialog" aria-modal="true" aria-label={note ? 'Edit note' : 'New note'}
@@ -192,6 +192,6 @@ function NoteEditor({ note, onClose, onSaved }: {
           </div>
         </form>
       </div>
-    </>
+    </Portal>
   )
 }
