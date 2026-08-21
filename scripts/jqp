@@ -1,0 +1,22 @@
+#!/usr/bin/env python3
+"""Read one field out of a JSON body on stdin. Searches nested objects, so `id`
+finds it whether the backend wrapped the row or not. Prints nothing on a miss,
+which is what the shell tests for."""
+import json, sys
+key = sys.argv[1]
+def find(o):
+    if isinstance(o, dict):
+        if key in o and o[key] is not None: return o[key]
+        for v in o.values():
+            r = find(v)
+            if r is not None: return r
+    if isinstance(o, list):
+        for v in o:
+            r = find(v)
+            if r is not None: return r
+    return None
+try:
+    v = find(json.load(sys.stdin))
+except Exception:
+    v = None
+print('' if v is None else v)
