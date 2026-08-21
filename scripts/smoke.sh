@@ -10,8 +10,9 @@ set -uo pipefail
 
 BASE="${BASE:-http://127.0.0.1:8099}"
 JQ="$(dirname "$0")/jqp"
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIP=0
 
+skip() { printf '  \033[33mskip\033[0m %s\n' "$1"; SKIP=$((SKIP+1)); }
 ok()   { printf '  \033[32mok\033[0m   %s\n' "$1"; PASS=$((PASS+1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; FAIL=$((FAIL+1)); }
 # NOT named `head`: that shadows /usr/bin/head, and any `| head -c N`
@@ -51,18 +52,31 @@ UID_=$(printf '%s' "$LOGIN"  | "$JQ" id)
 AUTH=(-H "Authorization: Bearer $TOKEN")
 
 section "2 · the IDOR guard (the reason the token exists)"
+# These assertions only hold with WEB_AUTH_ENFORCE=1. With it off — the default,
+# because the Flutter app sends no token and enforcement would 401 every mobile
+# call — the middleware is inert BY DESIGN and every probe below correctly returns
+# 200. Reporting that as eight failures is a test lying about its own
+# preconditions, so it is detected and skipped with the reason stated instead.
+ENFORCED=$(curl -s -o /dev/null -w '%{http_code}' -m 20 "$BASE/tasks/$UID_")
+if [ "$ENFORCED" = "401" ]; then ENFORCED=yes; else ENFORCED=no; fi
 # Hoisted: $(( )) nested inside an escaped-quote payload inside $( )
 # across a line continuation reaches curl malformed.
 OTHER=$((UID_+1))
-check "GET /tasks/\$me with token" 200 "${AUTH[@]}" "$BASE/tasks/$UID_"
-check "GET /tasks/\$me WITHOUT token" 401 "$BASE/tasks/$UID_"
-check "GET someone else's tasks" 403 "${AUTH[@]}" "$BASE/tasks/$OTHER"
-check "GET someone else's notes" 403 "${AUTH[@]}" "$BASE/users/$OTHER/notes"
-check "GET notes?user_id=other" 403 "${AUTH[@]}" "$BASE/notes/1?user_id=$OTHER"
-check "garbage token" 401 -H 'Authorization: Bearer nope' "$BASE/tasks/$UID_"
-check "POST /chat claiming another user" 403 -X POST "${AUTH[@]}" -H 'Content-Type: application/json' -d "{\"user_id\":$OTHER,\"message\":\"hi\"}" "$BASE/chat"
-check "POST /chat/stream claiming another user" 403 -X POST "${AUTH[@]}" -H 'Content-Type: application/json' -d "{\"user_id\":$OTHER,\"message\":\"hi\"}" "$BASE/chat/stream"
-check "POST /items claiming another user" 403 -X POST "${AUTH[@]}" -H 'Content-Type: application/json' -d "{\"user_id\":$OTHER,\"title\":\"x\",\"item_type\":\"task\"}" "$BASE/items"
+
+if [ "$ENFORCED" = "no" ]; then
+  skip "authorization checks — WEB_AUTH_ENFORCE is off, middleware inert by design"
+else
+  check "GET /tasks/\$me with token" 200 "${AUTH[@]}" "$BASE/tasks/$UID_"
+  check "GET /tasks/\$me WITHOUT token" 401 "$BASE/tasks/$UID_"
+  check "GET someone else's tasks" 403 "${AUTH[@]}" "$BASE/tasks/$OTHER"
+  check "GET someone else's notes" 403 "${AUTH[@]}" "$BASE/users/$OTHER/notes"
+  check "GET notes?user_id=other" 403 "${AUTH[@]}" "$BASE/notes/1?user_id=$OTHER"
+  check "garbage token" 401 -H 'Authorization: Bearer nope' "$BASE/tasks/$UID_"
+  check "POST /chat claiming another user" 403 -X POST "${AUTH[@]}" -H 'Content-Type: application/json' -d "{\"user_id\":$OTHER,\"message\":\"hi\"}" "$BASE/chat"
+  check "POST /chat/stream claiming another user" 403 -X POST "${AUTH[@]}" -H 'Content-Type: application/json' -d "{\"user_id\":$OTHER,\"message\":\"hi\"}" "$BASE/chat/stream"
+  check "POST /items claiming another user" 403 -X POST "${AUTH[@]}" -H 'Content-Type: application/json' -d "{\"user_id\":$OTHER,\"title\":\"x\",\"item_type\":\"task\",\"due_at\":\"$DUE\"}" "$BASE/items"
+fi
+
 check "/health stays public" 200 "$BASE/health"
 check "/auth/login stays public" 422 -X POST "$BASE/auth/login" -H 'Content-Type: application/json' -d '{}'
 
@@ -126,5 +140,6 @@ section "10 · cleanup"
 [ -n "${TASK_ID:-}" ] && check "delete the smoke task" 200 -X DELETE "${AUTH[@]}" "$BASE/items/$TASK_ID?user_id=$UID_"
 [ -n "${NOTE_ID:-}" ] && check "delete the smoke note" 200 -X DELETE "${AUTH[@]}" "$BASE/notes/$NOTE_ID?user_id=$UID_&hard=true"
 
-printf '\n\033[1m%d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
+printf '\n\033[1m%d passed, %d failed, %d skipped\033[0m\n' "$PASS" "$FAIL" "$SKIP"
+[ "$SKIP" -gt 0 ] && printf 'Run the backend with WEB_AUTH_ENFORCE=1 to exercise the authorization checks.\n'
 [ "$FAIL" -eq 0 ]
