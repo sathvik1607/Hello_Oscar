@@ -3,6 +3,7 @@ import { Menu, MoreHorizontal, X } from 'lucide-react'
 import { NAV, TITLES, type SectionId } from './nav'
 import { ConnectionBanner } from './ConnectionBanner'
 import { OscarButton } from '../features/voice/OscarButton'
+import { AmbientIndicator } from '../features/voice/AmbientIndicator'
 import { getUser, signOut } from '../lib/session'
 import { cx } from '../ui'
 
@@ -169,6 +170,8 @@ export function AppShell({ section, onNavigate, children }: {
                    active={secondary.some(s => s.id === section)}
                    onClick={() => setMoreOpen(v => !v)} />
       </nav>
+
+      <AmbientIndicator />
 
       {/* Floating Oscar, above the bottom bar — the mobile equivalent of the
           header button, placed where a thumb rests. */}

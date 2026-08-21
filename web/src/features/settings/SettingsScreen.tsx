@@ -7,6 +7,7 @@ import {
 } from '../../lib/session'
 import { reset as resetSocket, watchConnection, type ConnState } from '../../lib/appSocket'
 import { SPEAKERS } from '../../lib/speakers'
+import { useVoice } from '../voice/VoiceProvider'
 import {
   Badge, Button, Card, Confirmation, Field, SectionHeading, cx, inputCls, inputStyle,
 } from '../../ui'
@@ -28,9 +29,9 @@ export function SettingsScreen() {
   const [probe, setProbe] = useState<'idle' | 'checking' | 'ok' | 'fail'>('idle')
   const [probeMsg, setProbeMsg] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
-  const [speaker, setSpeaker] = useState(
-    localStorage.getItem('oscar.web.speaker') ??
-    (import.meta.env.VITE_SARVAM_SPEAKER as string) ?? 'dev')
+  // Voice settings live in the provider, so the picker and the ambient switch
+  // affect the running engine rather than a second copy of the preference.
+  const voice = useVoice()
 
   useEffect(() => watchConnection(setConn), [])
 
@@ -123,15 +124,41 @@ export function SettingsScreen() {
         <Card className="space-y-4 p-4">
           <Field label="Oscar's voice"
                  hint="Sarvam bulbul:v3. The first five are male voices, the rest female.">
-            <select value={speaker}
-                    onChange={e => {
-                      setSpeaker(e.target.value)
-                      localStorage.setItem('oscar.web.speaker', e.target.value)
-                    }}
+            <select value={voice.speaker}
+                    onChange={e => voice.setSpeaker(e.target.value)}
                     className={inputCls} style={inputStyle}>
               {SPEAKERS.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </Field>
+
+          {/* ── ambient wake ─────────────────────────────────────────── */}
+          <div className="rounded-xl border p-3.5"
+               style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}>
+            <label className="flex items-start gap-3">
+              <input type="checkbox" checked={voice.ambient} className="mt-0.5"
+                     onChange={e => voice.setAmbient(e.target.checked)} />
+              <span className="min-w-0">
+                <span className="block text-[13px] font-medium">
+                  Listen for &ldquo;Oscar&rdquo; in the background
+                </span>
+                <span className="mt-1 block text-xs leading-relaxed"
+                      style={{ color: 'var(--text-subtle)' }}>
+                  The microphone stays open while this tab is, so you can say
+                  &ldquo;Oscar, what&rsquo;s due today&rdquo; without tapping anything.
+                  It only acts on what is addressed to it by name.
+                </span>
+                {/* Stated plainly, because both consequences are real and neither is
+                    obvious: a continuously-open socket is billed per second and
+                    transcribes whatever is said nearby. */}
+                <span className="mt-2 block text-xs leading-relaxed"
+                      style={{ color: '#B45309' }}>
+                  Speech is transcribed continuously while this is on — including
+                  conversations near your microphone — and that is billed per minute.
+                  Off by default for exactly that reason.
+                </span>
+              </span>
+            </label>
+          </div>
           <p className="text-xs leading-relaxed" style={{ color: 'var(--text-subtle)' }}>
             Speech is relayed through the Oscar server, which holds the Sarvam
             credential — it never reaches this page. The microphone stays open only
