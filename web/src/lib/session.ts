@@ -81,6 +81,10 @@ export function signIn(token: string, user: SessionUser) {
 export function signOut() {
   localStorage.removeItem(K_TOKEN)
   localStorage.removeItem(K_USER)
+  // Wipe every cached response. It holds one person's tasks, notes and chat
+  // previews, and leaving it in memory across a sign-out on a shared machine is
+  // the whole reason the cache is not persisted to disk either.
+  void import('./cache').then(m => m.invalidate())
   // The base URL and theme survive: they are preferences, not credentials, and
   // wiping the base on sign-out would send the next login at the wrong host.
   emit()

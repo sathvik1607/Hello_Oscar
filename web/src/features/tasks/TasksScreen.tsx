@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { CheckSquare, Plus } from 'lucide-react'
 import { tasks as tasksApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
+import { useItemEvents } from '../../lib/itemEvents'
 import type { Task } from '../../lib/types'
 import { BUCKET_META, BUCKET_ORDER, completedToday, groupTasks } from './buckets'
 import { TaskCard } from './TaskCard'
@@ -32,7 +33,7 @@ export function TasksScreen() {
   const [openTask, setOpenTask] = useState<Task | null>(null)
   const [creating, setCreating] = useState(false)
 
-  const mine = useApi(s => tasksApi.mine(s))
+  const mine = useApi(s => tasksApi.mine(s), [], 'tasks:mine')
   // Fetched only when its tab is opened. Both are extra round trips against a
   // backend where a cold request can take seconds; loading them eagerly would make
   // the default tab wait for data nobody asked for.
@@ -45,6 +46,10 @@ export function TasksScreen() {
 
   const source = tab === 'delegated' ? delegated : tab === 'done' ? doneAll : mine
   const { toggle, busyId, error: actionError } = useTaskActions(source.patch, source.reload)
+
+  // A task created on the phone, or by Oscar in chat, appears here without a
+  // refresh. The frames were already being sent; nothing was listening.
+  useItemEvents(() => { mine.reload(); source.reload() })
 
   // See TodayScreen: `?? []` allocates per render and would defeat this memo.
   const allMine = useMemo(() => mine.data?.tasks ?? [], [mine.data])

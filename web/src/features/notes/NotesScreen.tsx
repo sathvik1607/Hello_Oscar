@@ -21,7 +21,7 @@ import {
  * NULL, and is a leftover from a redesign before ship.
  */
 export function NotesScreen() {
-  const n = useApi(s => notesApi.list(s))
+  const n = useApi(s => notesApi.list(s), [], 'notes')
   const [editing, setEditing] = useState<Note | 'new' | null>(null)
   const [confirmId, setConfirmId] = useState<number | null>(null)
   const [saved, setSaved] = useState<string | null>(null)

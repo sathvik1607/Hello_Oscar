@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { CalendarClock, CheckCircle2, Clock, Sparkles, Sun } from 'lucide-react'
 import { meetings as meetingsApi, tasks as tasksApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
+import { useItemEvents } from '../../lib/itemEvents'
 import { getUser } from '../../lib/session'
 import {
   dueLabel, isToday, istNow, parseIstNaive, timeLabel,
@@ -36,10 +37,14 @@ export function TodayScreen() {
   const [openTask, setOpenTask] = useState<Task | null>(null)
   const { openVoice } = useVoice()
 
-  const t = useApi(s => tasksApi.mine(s))
-  const m = useApi(s => meetingsApi.all(s))
+  const t = useApi(s => tasksApi.mine(s), [], 'tasks:mine')
+  const m = useApi(s => meetingsApi.all(s), [], 'meetings:all')
 
   const { toggle, busyId, error: actionError } = useTaskActions(t.patch, t.reload)
+
+  // A task created on the phone, or by Oscar in chat, appears here without a
+  // refresh. The frames were already being sent; nothing was listening.
+  useItemEvents(() => { t.reload(); m.reload() })
 
   // Keyed on `t.data`, NOT on `t.data?.tasks ?? []`. That fallback allocates a new
   // array on every render, so the memo below it would recompute every time — and

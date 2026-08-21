@@ -1,9 +1,12 @@
-import { useMemo, useState } from 'react'
-import { CalendarDays, ChevronLeft, ChevronRight, MapPin, Users } from 'lucide-react'
+import { useCallback, useMemo, useState } from 'react'
+import {
+  CalendarDays, ChevronLeft, ChevronRight, MapPin, Users,
+} from 'lucide-react'
 import { meetings as meetingsApi, tasks as tasksApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
+import { useItemEvents } from '../../lib/itemEvents'
 import {
-  dayLabel, fullDayLabel, istDateKey, istNow, parseIstNaive, timeLabel,
+  dayLabel, istDateKey, istNow, monthYearLabel, parseIstNaive, timeLabel,
 } from '../../lib/format'
 import type { Meeting, Task } from '../../lib/types'
 import {
@@ -11,158 +14,234 @@ import {
 } from '../../ui'
 
 /**
- * Meetings and scheduled time.
+ * A MONTH GRID plus the selected day's agenda — the same shape as the Flutter
+ * calendar, because a week strip answered a different question.
  *
- * An AGENDA, not a month grid. A month grid is the right shape when you are
- * scanning for free space, and this backend cannot answer that question —
- * `/calendar/free-slots` is a hardcoded `[]` stub. What it can answer is "what is
- * happening, in order", so that is what this shows: a week strip to move between
- * days, and one day's items in time order.
+ * The grid's job is "which days have anything on them", and the dots answer it at a
+ * glance. The rules are lifted from the Flutter `_DayCell` rather than reinvented,
+ * because they encode a real decision:
  *
- * Tasks appear alongside meetings because a 4pm deadline and a 4pm meeting compete
- * for the same 4pm, and a calendar that shows only one of them is lying about the
- * day.
+ *   green  — an ACTIVE task
+ *   blue   — an ACTIVE meeting
+ *   grey   — anything completed or cancelled
+ *
+ * and only THREE dots are drawn, live ones first, with an overflow count. Ordering
+ * matters: a day with six finished items and one live one must not hide the live
+ * one behind the grey.
+ *
+ * Weekday columns start on MONDAY (Mo–Su), matching the app. Sunday-first would put
+ * the weekend on both ends of the row.
  */
 export function CalendarScreen() {
-  const [offset, setOffset] = useState(0)     // days from today
-  const m = useApi(s => meetingsApi.all(s))
-  const t = useApi(s => tasksApi.mine(s))
+  // The month being viewed, and the day selected inside it — two separate pieces of
+  // state. Collapsing them means paging to another month drags the selection along
+  // and the agenda changes under you.
+  const [monthAnchor, setMonthAnchor] = useState(() => startOfMonth(istNow()))
+  const [selectedKey, setSelectedKey] = useState(() => istDateKey(istNow()))
 
-  const selected = useMemo(
-    () => new Date(istNow().getTime() + offset * 86_400_000), [offset])
-  const selectedKey = istDateKey(selected)
+  const m = useApi(s => meetingsApi.all(s), [], 'meetings:all')
+  const t = useApi(s => tasksApi.mine(s), [], 'tasks:mine')
 
-  // The week strip is anchored on the SELECTED day, not on a calendar week, so
-  // paging never lands on an empty stretch you have to page past.
-  const strip = useMemo(
-    () => Array.from({ length: 7 },
-      (_, i) => new Date(istNow().getTime() + (offset - 3 + i) * 86_400_000)),
-    [offset])
+  useItemEvents(() => { m.reload(); t.reload() })
 
+  // ── index everything by day, once ────────────────────────────────────────
   const byDay = useMemo(() => {
-    const meetings = (m.data?.meetings ?? []).filter(x => x.status !== 'cancelled')
-    const tasks = (t.data?.tasks ?? [])
-      .filter(x => x.status !== 'cancelled' && x.due_at)
-
-    const counts = new Map<string, number>()
-    for (const x of meetings) {
-      const at = parseIstNaive(x.scheduled_at)
-      if (at) counts.set(istDateKey(at), (counts.get(istDateKey(at)) ?? 0) + 1)
+    const map = new Map<string, { tasks: Task[]; meetings: Meeting[] }>()
+    const slot = (k: string) => {
+      let v = map.get(k)
+      if (!v) { v = { tasks: [], meetings: [] }; map.set(k, v) }
+      return v
     }
-    for (const x of tasks) {
-      const at = parseIstNaive(x.due_at)
-      if (at) counts.set(istDateKey(at), (counts.get(istDateKey(at)) ?? 0) + 1)
-    }
-    return counts
-  }, [m.data, t.data])
-
-  const dayItems = useMemo(() => {
-    type Row =
-      | { kind: 'meeting'; at: Date | null; end: Date | null; meeting: Meeting }
-      | { kind: 'task'; at: Date | null; task: Task }
-
-    const rows: Row[] = []
     for (const x of m.data?.meetings ?? []) {
-      if (x.status === 'cancelled') continue
       const at = parseIstNaive(x.scheduled_at)
-      if (at && istDateKey(at) === selectedKey) {
-        rows.push({ kind: 'meeting', at, end: parseIstNaive(x.ends_at), meeting: x })
-      }
+      if (at) slot(istDateKey(at)).meetings.push(x)
     }
     for (const x of t.data?.tasks ?? []) {
-      if (x.status === 'cancelled') continue
       const at = parseIstNaive(x.due_at)
-      if (at && istDateKey(at) === selectedKey) rows.push({ kind: 'task', at, task: x })
+      // An undated task has no place on a calendar — it appears on Tasks instead,
+      // rather than being filed under an arbitrary day.
+      if (at) slot(istDateKey(at)).tasks.push(x)
     }
-    return rows.sort((a, b) => (a.at?.getTime() ?? 0) - (b.at?.getTime() ?? 0))
-  }, [m.data, t.data, selectedKey])
+    return map
+  }, [m.data, t.data])
 
+  const cells = useMemo(() => monthCells(monthAnchor), [monthAnchor])
+
+  const selected = useMemo(() => {
+    const [y, mo, d] = selectedKey.split('-').map(Number)
+    return new Date(Date.UTC(y, mo - 1, d, 12) - 0)   // noon, so no TZ edge flips it
+  }, [selectedKey])
+
+  const dayRows = useMemo(() => {
+    const bag = byDay.get(selectedKey)
+    if (!bag) return [] as Row[]
+    const rows: Row[] = [
+      ...bag.meetings
+        .filter(x => x.status !== 'cancelled')
+        .map(x => ({ kind: 'meeting' as const, at: parseIstNaive(x.scheduled_at),
+                     end: parseIstNaive(x.ends_at), meeting: x })),
+      ...bag.tasks
+        .filter(x => x.status !== 'cancelled')
+        .map(x => ({ kind: 'task' as const, at: parseIstNaive(x.due_at), task: x })),
+    ]
+    return rows.sort((a, b) => (a.at?.getTime() ?? 0) - (b.at?.getTime() ?? 0))
+  }, [byDay, selectedKey])
+
+  const step = useCallback((delta: number) => {
+    setMonthAnchor(a => new Date(Date.UTC(a.getUTCFullYear(), a.getUTCMonth() + delta, 1, 12)))
+  }, [])
+
+  const todayKey = istDateKey(istNow())
   const loading = (m.loading && !m.data) || (t.loading && !t.data)
   const error = m.error ?? t.error
+  const viewingThisMonth = istDateKey(monthAnchor).slice(0, 7) === todayKey.slice(0, 7)
 
   return (
     <div className="space-y-5">
-      {/* ── week strip ───────────────────────────────────────────────── */}
-      <Card className="p-3">
-        <div className="mb-2.5 flex items-center justify-between gap-2 px-1">
-          <button onClick={() => setOffset(o => o - 7)} aria-label="Previous week"
-                  className="grid size-8 place-items-center rounded-lg"
+      {/* ── month grid ───────────────────────────────────────────────── */}
+      <Card className="p-3 sm:p-4">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <button onClick={() => step(-1)} aria-label="Previous month"
+                  className="grid size-9 place-items-center rounded-lg"
                   style={{ color: 'var(--text-muted)' }}>
             <ChevronLeft className="size-4" />
           </button>
-          <div className="text-[13px] font-semibold">{fullDayLabel(selected)}</div>
-          <button onClick={() => setOffset(o => o + 7)} aria-label="Next week"
-                  className="grid size-8 place-items-center rounded-lg"
+          <div className="text-sm font-semibold">{monthYearLabel(monthAnchor)}</div>
+          <button onClick={() => step(1)} aria-label="Next month"
+                  className="grid size-9 place-items-center rounded-lg"
                   style={{ color: 'var(--text-muted)' }}>
             <ChevronRight className="size-4" />
           </button>
         </div>
 
-        <div className="grid grid-cols-7 gap-1">
-          {strip.map(d => {
-            const key = istDateKey(d)
+        <div className="grid grid-cols-7 gap-px">
+          {['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map(l => (
+            <div key={l} className="pb-1.5 text-center text-[11px] font-semibold"
+                 style={{ color: 'var(--text-subtle)' }}>{l}</div>
+          ))}
+
+          {cells.map((cell, i) => {
+            if (!cell) {
+              // Leading/trailing blanks keep the grid rectangular. Rendering the
+              // neighbouring month's numbers here instead invites taps on days the
+              // agenda below is not showing.
+              return <div key={`b${i}`} className="h-[54px]" />
+            }
+            const key = cell.key
+            const bag = byDay.get(key)
             const isSel = key === selectedKey
-            const isToday = key === istDateKey(istNow())
-            const n = byDay.get(key) ?? 0
+            const isToday = key === todayKey
             return (
               <button
                 key={key}
-                onClick={() => setOffset(Math.round(
-                  (d.getTime() - istNow().getTime()) / 86_400_000))}
-                aria-current={isSel ? 'date' : undefined}
-                className="flex flex-col items-center gap-1 rounded-xl py-2 transition"
+                onClick={() => setSelectedKey(key)}
+                aria-current={isToday ? 'date' : undefined}
+                aria-pressed={isSel}
+                className="flex h-[54px] flex-col items-center gap-1 rounded-xl pt-1.5 transition"
                 style={isSel
                   ? { background: 'var(--accent)', color: '#fff' }
-                  : { color: 'var(--text-muted)' }}
+                  : isToday
+                    ? { background: 'var(--accent-soft)', color: 'var(--accent)' }
+                    : { color: 'var(--text)' }}
               >
-                <span className="text-[10px] font-medium uppercase opacity-70">
-                  {dayLabel(d).split(' ')[0]}
+                <span className={cx('text-[13px] tabular-nums',
+                                    (isSel || isToday) ? 'font-bold' : 'font-medium')}>
+                  {cell.day}
                 </span>
-                <span className={cx('text-[15px] font-semibold tabular-nums',
-                                    isToday && !isSel && 'underline decoration-2 underline-offset-4')}>
-                  {Number(key.slice(-2))}
-                </span>
-                {/* A dot, not a count. The number is meaningless at this size and
-                    the presence of anything at all is the useful signal. */}
-                <span className="h-1 w-1 rounded-full"
-                      style={{ background: n > 0
-                        ? (isSel ? 'rgba(255,255,255,.85)' : 'var(--accent)')
-                        : 'transparent' }} />
+                <Dots bag={bag} inverted={isSel} />
               </button>
             )
           })}
         </div>
 
-        {offset !== 0 && (
-          <div className="mt-2.5 flex justify-center">
-            <Button size="sm" variant="ghost" onClick={() => setOffset(0)}>Back to today</Button>
+        {!viewingThisMonth && (
+          <div className="mt-2 flex justify-center">
+            <Button size="sm" variant="ghost"
+                    onClick={() => {
+                      setMonthAnchor(startOfMonth(istNow()))
+                      setSelectedKey(todayKey)
+                    }}>
+              Back to today
+            </Button>
           </div>
         )}
       </Card>
 
-      {/* ── the day ──────────────────────────────────────────────────── */}
+      {/* ── the selected day ─────────────────────────────────────────── */}
+      <div className="flex items-baseline justify-between gap-3 px-1">
+        <h2 className="text-[15px] font-semibold">
+          {selectedKey === todayKey ? 'Today' : dayLabel(selected)}
+        </h2>
+        {dayRows.length > 0 && (
+          <span className="text-xs tabular-nums" style={{ color: 'var(--text-subtle)' }}>
+            {dayRows.length} {dayRows.length === 1 ? 'item' : 'items'}
+          </span>
+        )}
+      </div>
+
       {loading && <Skeleton rows={3} />}
       {error && !m.data && !t.data && (
         <ErrorState error={error} onRetry={() => { m.reload(); t.reload() }} />
       )}
 
-      {!loading && dayItems.length === 0 && (
+      {!loading && dayRows.length === 0 && (
         <Card>
           <EmptyState
             icon={<CalendarDays className="size-6" />}
-            title={offset === 0 ? 'Nothing scheduled today' : `Nothing on ${dayLabel(selected)}`}
-            body="Meetings and anything with a deadline will show up here in time order."
+            title={selectedKey === todayKey ? 'Nothing scheduled today' : 'Nothing on this day'}
+            body="Meetings and anything with a deadline appear here, in time order."
           />
         </Card>
       )}
 
       <div className="space-y-2">
-        {dayItems.map(row => row.kind === 'meeting'
+        {dayRows.map(row => row.kind === 'meeting'
           ? <MeetingCard key={`m${row.meeting.id}`} meeting={row.meeting}
                          at={row.at} end={row.end} />
           : <TaskRow key={`t${row.task.id}`} task={row.task} at={row.at} />)}
       </div>
     </div>
+  )
+}
+
+type Row =
+  | { kind: 'meeting'; at: Date | null; end: Date | null; meeting: Meeting }
+  | { kind: 'task'; at: Date | null; task: Task }
+
+/** At most three dots, live ones first, then an overflow count — the Flutter rule.
+ *  A day of finished work must not push its one live item out of view. */
+function Dots({ bag, inverted }: {
+  bag: { tasks: Task[]; meetings: Meeting[] } | undefined
+  inverted: boolean
+}) {
+  if (!bag) return <span className="h-1.5" />
+  const isDone = (s: string) => s === 'completed' || s === 'cancelled'
+  const activeTasks = bag.tasks.filter(x => !isDone(x.status)).length
+  const activeMeetings = bag.meetings.filter(x => !isDone(x.status)).length
+  const doneCount = bag.tasks.filter(x => isDone(x.status)).length +
+                    bag.meetings.filter(x => isDone(x.status)).length
+
+  const colours = [
+    ...Array<string>(activeTasks).fill('#22C55E'),
+    ...Array<string>(activeMeetings).fill('#4F46E5'),
+    ...Array<string>(doneCount).fill('#94A3B8'),
+  ]
+  const shown = colours.slice(0, 3)
+  const overflow = colours.length - shown.length
+
+  return (
+    <span className="flex items-center gap-[3px]">
+      {shown.map((c, i) => (
+        <span key={i} className="size-1.5 rounded-full"
+              style={{ background: inverted ? 'rgba(255,255,255,.9)' : c }} />
+      ))}
+      {overflow > 0 && (
+        <span className="text-[9px] font-bold leading-none"
+              style={{ color: inverted ? 'rgba(255,255,255,.9)' : 'var(--text-subtle)' }}>
+          +{overflow}
+        </span>
+      )}
+    </span>
   )
 }
 
@@ -172,7 +251,6 @@ function MeetingCard({ meeting, at, end }: {
   const now = istNow()
   const live = !!at && !!end && at <= now && now <= end
   const past = !!end && end < now
-
   return (
     <Card className={cx(past && 'opacity-60')}>
       <div className="flex gap-3.5 p-3.5">
@@ -185,7 +263,7 @@ function MeetingCard({ meeting, at, end }: {
           )}
         </div>
         <div className="w-[3px] shrink-0 rounded-full"
-             style={{ background: live ? '#22C55E' : 'var(--accent)' }} />
+             style={{ background: live ? '#22C55E' : '#4F46E5' }} />
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <div className="text-[14.5px] font-medium leading-snug">{meeting.title}</div>
@@ -204,11 +282,6 @@ function MeetingCard({ meeting, at, end }: {
               </span>
             )}
           </div>
-          {meeting.description && (
-            <p className="mt-1.5 line-clamp-2 text-xs" style={{ color: 'var(--text-subtle)' }}>
-              {meeting.description}
-            </p>
-          )}
         </div>
       </div>
     </Card>
@@ -224,7 +297,7 @@ function TaskRow({ task, at }: { task: Task; at: Date | null }) {
           {at ? timeLabel(at) : '—'}
         </div>
         <div className="w-[3px] shrink-0 rounded-full"
-             style={{ background: task.is_overdue ? '#EF4444' : 'var(--border-strong)' }} />
+             style={{ background: task.is_overdue ? '#EF4444' : '#22C55E' }} />
         <div className="min-w-0 flex-1">
           <div className={cx('text-[14.5px] font-medium leading-snug', done && 'line-through')}>
             {task.title}
@@ -237,4 +310,33 @@ function TaskRow({ task, at }: { task: Task; at: Date | null }) {
       </div>
     </Card>
   )
+}
+
+// ── grid maths ──────────────────────────────────────────────────────────────
+// Done in UTC at noon throughout. Midday means no arithmetic here can be pushed
+// into the neighbouring day by an offset, and IST has no DST to complicate it.
+
+function startOfMonth(d: Date): Date {
+  const key = istDateKey(d)          // the IST calendar day, not the browser's
+  const [y, m] = key.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, 1, 12))
+}
+
+/** Blanks for the days before the 1st, then one cell per day. Monday-first, so the
+ *  offset is `(weekday + 6) % 7` — JS weekdays are Sunday-based. */
+function monthCells(anchor: Date): ({ key: string; day: number } | null)[] {
+  const y = anchor.getUTCFullYear()
+  const mo = anchor.getUTCMonth()
+  const first = new Date(Date.UTC(y, mo, 1, 12))
+  const offset = (first.getUTCDay() + 6) % 7
+  const daysInMonth = new Date(Date.UTC(y, mo + 1, 0, 12)).getUTCDate()
+
+  const out: ({ key: string; day: number } | null)[] = Array(offset).fill(null)
+  for (let d = 1; d <= daysInMonth; d++) {
+    const p = (n: number) => String(n).padStart(2, '0')
+    out.push({ key: `${y}-${p(mo + 1)}-${p(d)}`, day: d })
+  }
+  // Pad to a whole number of rows so the card does not change height month to month.
+  while (out.length % 7 !== 0) out.push(null)
+  return out
 }

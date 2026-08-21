@@ -196,8 +196,15 @@ export const tasks = {
       method: 'PATCH', body: { ...updates, user_id: requireUserId() },
     }),
 
-  remove: (itemId: number) =>
-    request<void>(`/items/${itemId}?user_id=${requireUserId()}`, { method: 'DELETE' }),
+  /** SOFT by default: `hard` is unset, so the backend sets status='cancelled' and
+   *  keeps the row — it still appears on the Calendar. `hard=true` removes it and
+   *  its descendants; this client never asks for that.
+   *
+   *  404 is treated as SUCCESS. It means the item is already gone, and rolling the
+   *  UI back would resurrect a row the user has just dismissed. */
+  cancel: (itemId: number) =>
+    request<void>(`/items/${itemId}?user_id=${requireUserId()}`,
+      { method: 'DELETE', nullOn404: true }),
 
   timeline: (taskId: number, signal?: AbortSignal) =>
     request<unknown[]>(`/tasks/${taskId}/timeline`, { signal }),

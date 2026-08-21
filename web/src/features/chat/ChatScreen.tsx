@@ -296,7 +296,11 @@ export function ChatScreen() {
         {turns.length === 0 && chips.length > 0 && (
           <div className="flex flex-wrap gap-1.5 px-4 pb-3 sm:px-5">
             {chips.map(c => (
-              <button key={c} onClick={() => void send(c)}
+              // 🔴 Fills the composer, never sends. A tap that fires an
+              // irreversible request is a worse mistake than one that fills a text
+              // field — and these chips sit next to an agent that can create tasks
+              // and message a team.
+              <button key={c} onClick={() => setDraft(c)}
                       className="rounded-full border px-3 py-1.5 text-[12.5px] transition
                                  hover:brightness-[.97]"
                       style={{ background: 'var(--bg)', borderColor: 'var(--border)',

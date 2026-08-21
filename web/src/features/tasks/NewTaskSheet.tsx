@@ -24,7 +24,6 @@ export function NewTaskSheet({ onClose, onCreated }: {
   const [title, setTitle] = useState('')
   const [date, setDate] = useState(istDateKey(istNow()))
   const [time, setTime] = useState(defaultTime())
-  const [noTime, setNoTime] = useState(false)
   const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium')
   const [description, setDescription] = useState('')
   const [busy, setBusy] = useState(false)
@@ -46,7 +45,9 @@ export function NewTaskSheet({ onClose, onCreated }: {
     try {
       // Built from the date/time PARTS rather than parsed out of a Date, so the
       // browser's timezone never enters the value.
-      const due_at = noTime ? null : `${date}T${time}:00`
+      // Built from the date/time PARTS, so the browser's timezone never enters
+      // the value. IST-naive is what the backend stores.
+      const due_at = `${date}T${time}:00`
       await tasksApi.create({
         title: t,
         ...(description.trim() ? { description: description.trim() } : {}),
@@ -77,35 +78,29 @@ export function NewTaskSheet({ onClose, onCreated }: {
         </div>
 
         <form onSubmit={submit} className="space-y-4">
-          <Field label="What needs doing">
+          <Field label="Title">
             <input ref={titleRef} value={title} onChange={e => setTitle(e.target.value)}
                    className={inputCls} style={inputStyle}
-                   placeholder="Call the supplier about the invoice" />
+                   placeholder="What needs to be done?" />
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="Date">
-              <input type="date" value={date} disabled={noTime}
+              <input type="date" value={date} required
                      onChange={e => setDate(e.target.value)}
-                     className={cx(inputCls, noTime && 'opacity-45')} style={inputStyle} />
+                     className={inputCls} style={inputStyle} />
             </Field>
             <Field label="Time">
-              <input type="time" value={time} disabled={noTime}
+              <input type="time" value={time} required
                      onChange={e => setTime(e.target.value)}
-                     className={cx(inputCls, noTime && 'opacity-45')} style={inputStyle} />
+                     className={inputCls} style={inputStyle} />
             </Field>
           </div>
 
-          <label className="flex items-center gap-2 text-[13px]" style={{ color: 'var(--text-muted)' }}>
-            <input type="checkbox" checked={noTime}
-                   onChange={e => setNoTime(e.target.checked)} />
-            No specific time
-            {/* Worth saying: an undated task gets no reminder at all, which is a
-                surprise if you expected one. */}
-            <span className="text-[11px]" style={{ color: 'var(--text-subtle)' }}>
-              (no reminder)
-            </span>
-          </label>
+          {/* 🔴 There is deliberately no "no time" option. `due_at` is REQUIRED by
+              POST /items — measured: null and omitted both return 400 — because the
+              planner is time-ordered. Offering the choice produced a form that
+              always failed for anyone who ticked it. */}
 
           <Field label="Priority" hint="High gets a reminder 30 minutes ahead; low gets none until it's overdue.">
             <div className="flex gap-1.5">
@@ -123,10 +118,16 @@ export function NewTaskSheet({ onClose, onCreated }: {
             </div>
           </Field>
 
-          <Field label="Notes">
+          {/* `description` — the real column on pa_items, the one the agent writes
+              and PATCH /items reads. Never required: the title IS the task. This is
+              for when a title alone loses something — an address, a spec, what
+              "follow up" actually meant. Same wording and shape as the Flutter
+              sheet, so the two clients do not name one field two ways. */}
+          <Field label="Description">
             <textarea value={description} onChange={e => setDescription(e.target.value)}
-                      rows={2} placeholder="Optional"
-                      className={cx(inputCls, 'resize-none')} style={inputStyle} />
+                      rows={3} placeholder="Add details (optional)"
+                      className={cx(inputCls, 'resize-none leading-relaxed')}
+                      style={inputStyle} />
           </Field>
 
           {err && <p className="text-[13px]" style={{ color: '#DC2626' }}>{err}</p>}

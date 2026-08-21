@@ -41,7 +41,7 @@ const ROUTE: Partial<Record<NotificationType, SectionId>> = {
 }
 
 export function NotificationsScreen({ onNavigate }: { onNavigate: (s: SectionId) => void }) {
-  const n = useApi(s => notifApi.list(false, s))
+  const n = useApi(s => notifApi.list(false, s), [], 'notifications')
   const [live, setLive] = useState<AppNotification[]>([])
   const [busy, setBusy] = useState(false)
   const [filter, setFilter] = useState<'all' | 'unread'>('all')
@@ -69,7 +69,12 @@ export function NotificationsScreen({ onNavigate }: { onNavigate: (s: SectionId)
     // Live frames whose real row has since arrived would otherwise show twice.
     // Matched on message text because the frame has no id to match on.
     const seen = new Set(server.map(r => r.message))
+    // 🔴 Sorted by created_at, NEVER by id. A live frame carries no notification
+    // id, so the synthetic one here is a negative epoch value — ordering by id
+    // would interleave live rows with real ones arbitrarily. The Flutter client
+    // hits the same trap from the other direction, with ~1.7e12 placeholders.
     const merged = [...live.filter(l => !seen.has(l.message)), ...server]
+      .sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
     return filter === 'unread' ? merged.filter(r => !r.is_read) : merged
   }, [n.data, live, filter])
 

@@ -151,7 +151,7 @@ export function TaskDetail({ task, onClose, onChanged }: {
   const remove = useCallback(async () => {
     setErr(null)
     try {
-      await tasksApi.remove(task.id)
+      await tasksApi.cancel(task.id)
       onChanged()
       onClose()
     } catch (e) {
@@ -160,16 +160,20 @@ export function TaskDetail({ task, onClose, onChanged }: {
     }
   }, [task.id, onChanged, onClose])
 
+  // Each row says whether its value may be capitalised. A blanket `capitalize`
+  // class turned "6:00 pm" into "6:00 Pm" — CSS capitalises the first letter of
+  // EVERY word, so it reaches inside a formatted time and a filename too. Only the
+  // enum-ish values want it.
   const details = useMemo(() => [
-    ['Status', STATUS_LABEL[task.status] ?? task.status],
-    ['Priority', task.priority],
-    ['Due', due ? dueLabel(due) : 'No time set'],
-    ['Created', task.created_at ? messageTime(task.created_at) : '—'],
-    ...(task.completed_at ? [['Completed', messageTime(task.completed_at)]] : []),
-    ...(task.owner_name ? [['Created by', task.owner_name]] : []),
-    ...(task.subtask_count ? [['Sub-tasks', String(task.subtask_count)]] : []),
-    ['Task ID', `#${task.id}`],
-  ] as [string, string][], [task, due])
+    ['Status', STATUS_LABEL[task.status] ?? task.status, false],
+    ['Priority', task.priority, true],
+    ['Due', due ? dueLabel(due) : 'No time set', false],
+    ['Created', task.created_at ? messageTime(task.created_at) : '—', false],
+    ...(task.completed_at ? [['Completed', messageTime(task.completed_at), false]] : []),
+    ...(task.owner_name ? [['Created by', task.owner_name, false]] : []),
+    ...(task.subtask_count ? [['Sub-tasks', String(task.subtask_count), false]] : []),
+    ['Task ID', `#${task.id}`, false],
+  ] as [string, string, boolean][], [task, due])
 
   const canSend = (!!draft.trim() || staged.length > 0) && !uploading.length
 
@@ -232,10 +236,10 @@ export function TaskDetail({ task, onClose, onChanged }: {
           {showDetails && (
             <dl className="fade mt-2.5 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-xl p-3.5"
                 style={{ background: 'var(--bg-sunken)' }}>
-              {details.map(([k, v]) => (
+              {details.map(([k, v, cap]) => (
                 <div key={k} className="contents">
                   <dt className="text-[12px]" style={{ color: 'var(--text-subtle)' }}>{k}</dt>
-                  <dd className="text-[12px] font-medium capitalize">{v}</dd>
+                  <dd className={cx('text-[12px] font-medium', cap && 'capitalize')}>{v}</dd>
                 </div>
               ))}
             </dl>
@@ -285,7 +289,7 @@ export function TaskDetail({ task, onClose, onChanged }: {
             {confirmDelete ? (
               <>
                 <Button size="sm" variant="danger" onClick={() => void remove()}>
-                  Delete for good
+                  Cancel it
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>
                   Keep
@@ -293,7 +297,10 @@ export function TaskDetail({ task, onClose, onChanged }: {
               </>
             ) : (
               <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(true)}>
-                <Trash2 className="size-3.5" /> Delete
+                {/* "Cancel", not "Delete": this is a SOFT delete — the row survives
+                    with status='cancelled' and still shows on the Calendar. Calling
+                    it Delete promises destruction the backend does not perform. */}
+                <Trash2 className="size-3.5" /> Cancel task
               </Button>
             )}
           </div>

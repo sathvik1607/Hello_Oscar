@@ -59,12 +59,37 @@ const fmtDateKey = new Intl.DateTimeFormat('en-CA', {
   year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'Asia/Kolkata',
 })
 
+/**
+ * Dedicated single-part formatters.
+ *
+ * 🔴 Do NOT derive these by splitting a composite format. `dayLabel` returns
+ * "Fri, 21 Aug" in en-IN, so `.split(' ')[0]` is `"Fri,"` — comma included — and
+ * that is what every weekday cell of the calendar's week strip rendered. Part
+ * order and punctuation are locale properties; slicing a formatted string is
+ * guessing at them.
+ */
+const fmtWeekday = new Intl.DateTimeFormat('en-IN', {
+  weekday: 'short', timeZone: 'Asia/Kolkata',
+})
+const fmtMonthYear = new Intl.DateTimeFormat('en-IN', {
+  month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata',
+})
+const fmtDayNum = new Intl.DateTimeFormat('en-IN', {
+  day: 'numeric', timeZone: 'Asia/Kolkata',
+})
+
 /** YYYY-MM-DD in IST — the key everything groups by. Built with Intl rather than
  *  slicing an ISO string, because toISOString() is UTC and would file a 6 AM IST
  *  task under the previous day. */
 export const istDateKey = (d: Date) => fmtDateKey.format(d)
 
 export const timeLabel = (d: Date) => fmtTime.format(d).toLowerCase()
+/** "Fri" — the week-strip column heading. */
+export const weekdayLabel = (d: Date) => fmtWeekday.format(d)
+/** "21" — the day number, formatted rather than sliced off a date key. */
+export const dayNumber = (d: Date) => fmtDayNum.format(d)
+/** "August 2026" — the context a week strip needs when it crosses a month. */
+export const monthYearLabel = (d: Date) => fmtMonthYear.format(d)
 export const dayLabel = (d: Date) => fmtDay.format(d)
 export const fullDayLabel = (d: Date) => fmtFull.format(d)
 

@@ -29,8 +29,8 @@ import {
  * and cannot be approved again.
  */
 export function PersonalizeScreen() {
-  const n = useApi(s => notesApi.list(s))
-  const biz = useApi(s => assistant.business(s))
+  const n = useApi(s => notesApi.list(s), [], 'notes')
+  const biz = useApi(s => assistant.business(s), [], 'business')
 
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
