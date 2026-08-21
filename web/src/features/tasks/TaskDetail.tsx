@@ -4,7 +4,7 @@ import { ApiError, tasks as tasksApi } from '../../lib/api'
 import { getUser } from '../../lib/session'
 import { dueLabel, messageTime, parseIstNaive, relative } from '../../lib/format'
 import type { Task } from '../../lib/types'
-import { CommentThread } from './CommentThread'
+import { CommentComposer, CommentList, useCommentThread } from './CommentThread'
 import {
   Badge, Button, IconButton, Portal, STATUS_LABEL, cx,
 } from '../../ui'
@@ -40,6 +40,10 @@ export function TaskDetail({ task, onClose, onChanged }: {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [showDetails, setShowDetails] = useState(false)
   const [busyAction, setBusyAction] = useState(false)
+
+  // One hook, two placements: the list scrolls with the sheet body, the composer
+  // is pinned by the sheet's flex column so it is always at the bottom.
+  const thread = useCommentThread(task.id, onChanged)
 
   const due = parseIstNaive(task.due_at)
   const done = task.status === 'completed'
@@ -236,9 +240,11 @@ export function TaskDetail({ task, onClose, onChanged }: {
 
           {/* ── comments ────────────────────────────────────────────── */}
           <div className="mt-6">
-            <CommentThread itemId={task.id} onPosted={onChanged} />
+            <CommentList t={thread} />
           </div>
         </div>
+
+        <CommentComposer t={thread} />
       </aside>
     </Portal>
   )

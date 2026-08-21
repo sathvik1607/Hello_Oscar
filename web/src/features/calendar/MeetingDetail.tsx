@@ -3,7 +3,9 @@ import { Clock, MapPin, Trash2, Users, X } from 'lucide-react'
 import { ApiError, tasks as itemsApi } from '../../lib/api'
 import { dayLabel, istNow, parseIstNaive, timeLabel } from '../../lib/format'
 import type { Meeting } from '../../lib/types'
-import { CommentThread } from '../tasks/CommentThread'
+import {
+  CommentComposer, CommentList, useCommentThread,
+} from '../tasks/CommentThread'
 import { Badge, Button, IconButton, Portal, STATUS_LABEL, cx } from '../../ui'
 
 /**
@@ -25,6 +27,7 @@ export function MeetingDetail({ meeting, onClose, onChanged }: {
   onClose: () => void
   onChanged: () => void
 }) {
+  const thread = useCommentThread(meeting.id, onChanged)
   const [err, setErr] = useState<string | null>(null)
   const [confirm, setConfirm] = useState(false)
 
@@ -149,9 +152,11 @@ export function MeetingDetail({ meeting, onClose, onChanged }: {
           {err && <p className="mt-3 text-[13px]" style={{ color: '#DC2626' }}>{err}</p>}
 
           <div className="mt-6">
-            <CommentThread itemId={meeting.id} onPosted={onChanged} />
+            <CommentList t={thread} />
           </div>
         </div>
+
+        <CommentComposer t={thread} />
       </aside>
     </Portal>
   )
