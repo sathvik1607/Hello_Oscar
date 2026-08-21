@@ -1,12 +1,12 @@
 import {
-  Bell, CalendarDays, CheckSquare, Cog, Home, MessagesSquare,
+  Bell, CalendarDays, CheckSquare, Cog, Home, MessageSquare, MessagesSquare,
   NotebookPen, Sparkles, Users,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 export type SectionId =
   | 'today' | 'tasks' | 'calendar' | 'chat' | 'notes'
-  | 'personalize' | 'team' | 'notifications' | 'settings'
+  | 'personalize' | 'team' | 'messages' | 'notifications' | 'settings'
 
 export type NavItem = {
   id: SectionId
@@ -28,6 +28,7 @@ export const NAV: NavItem[] = [
   { id: 'chat',          label: 'Chat',     icon: MessagesSquare, primary: true },
   { id: 'notes',         label: 'Notes',    icon: NotebookPen },
   { id: 'personalize',   label: 'Personalize', icon: Sparkles },
+  { id: 'messages',      label: 'Messages', icon: MessageSquare, needsTeam: true },
   { id: 'team',          label: 'Team',     icon: Users, needsTeam: true },
   { id: 'notifications', label: 'Activity', icon: Bell },
   { id: 'settings',      label: 'Settings', icon: Cog },
@@ -41,6 +42,7 @@ export const TITLES: Record<SectionId, { title: string; subtitle: string }> = {
   notes:         { title: 'Notes',    subtitle: 'Context Oscar remembers' },
   personalize:   { title: 'Personalize', subtitle: 'Teach Oscar how you work' },
   team:          { title: 'Team',     subtitle: 'Who is on what' },
+  messages:      { title: 'Messages', subtitle: 'Team chat and direct messages' },
   notifications: { title: 'Activity', subtitle: 'Everything Oscar has told you' },
   settings:      { title: 'Settings', subtitle: 'Account, voice and connection' },
 }

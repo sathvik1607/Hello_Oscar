@@ -15,8 +15,9 @@
 
 import { getBase, getToken, requireUserId, signOut } from './session'
 import type {
-  AppNotification, BusinessProfile, ChatMessage, ChatSession, CommentAttachment,
-  LoginResponse, Meeting, Note, PlanDayResponse, Task, TaskComment, TeamMember,
+  AppNotification, BusinessProfile, ChatMessage, ChatSession, ChatText,
+  CommentAttachment, Conversations, LoginResponse, Meeting, Note, PlanDayResponse,
+  Task, TaskComment, TeamMember,
 } from './types'
 
 export class ApiError extends Error {
@@ -361,6 +362,59 @@ export const team = {
   memberTasks: (teamId: number, memberId: number, signal?: AbortSignal) =>
     request<{ count: number; tasks: Task[] }>(
       `/teams/${teamId}/members/${memberId}/tasks`, { signal }),
+}
+
+// ── messaging (team group chat + 1-on-1 DMs) ─────────────────────────────────
+
+export const messages = {
+  /** The authoritative unread counts. They come from read POINTERS in the
+   *  database, so a badge survives a reload — unlike anything counted client-side
+   *  during one session. Overwrite local counts with these; never merge. */
+  conversations: (signal?: AbortSignal) =>
+    request<Conversations>(`/users/${requireUserId()}/conversations`, { signal }),
+
+  /** `read_up_to_id` is the READ-BY-ALL pointer for a team thread (the minimum
+   *  across members), and the peer's pointer for a DM. It is what turns a sent
+   *  message's single tick into a double tick. */
+  team: (teamId: number, signal?: AbortSignal) =>
+    request<{ messages: ChatText[]; read_up_to_id: number | null }>(
+      `/teams/${teamId}/messages`, { signal }),
+
+  /** 🔴 Both send routes answer `{ok: true, message: {...}}` — NOT the row itself.
+   *  Unwrapped here so callers get a ChatText; appending the envelope optimistically
+   *  inserts a bubble with no id and no text, and the id is what dedupes it against
+   *  the WebSocket echo that follows. */
+  sendTeam: async (teamId: number, text: string, reply_to_id?: number | null) => {
+    const r = await request<{ ok: boolean; message: ChatText }>(
+      `/teams/${teamId}/messages`, {
+        method: 'POST',
+        body: { user_id: requireUserId(), text, ...(reply_to_id ? { reply_to_id } : {}) },
+      })
+    return r.message
+  },
+
+  direct: (peerId: number, signal?: AbortSignal) =>
+    request<{ messages: ChatText[]; read_up_to_id: number | null }>(
+      `/users/${requireUserId()}/direct/${peerId}/messages`, { signal }),
+
+  sendDirect: async (peerId: number, text: string, reply_to_id?: number | null) => {
+    const r = await request<{ ok: boolean; message: ChatText }>(
+      `/users/${requireUserId()}/direct/${peerId}/messages`, {
+        method: 'POST',
+        body: { text, ...(reply_to_id ? { reply_to_id } : {}) },
+      })
+    return r.message
+  },
+
+  /** Advance the read pointer. Fire-and-forget: a failed read receipt must never
+   *  block reading, so callers do not await it or surface its error. */
+  readTeam: (teamId: number, last_read_id: number) =>
+    request<unknown>(`/teams/${teamId}/messages/read`,
+      { method: 'POST', body: { user_id: requireUserId(), last_read_id } }),
+
+  readDirect: (peerId: number, last_read_id: number) =>
+    request<unknown>(`/users/${requireUserId()}/direct/${peerId}/read`,
+      { method: 'POST', body: { last_read_id } }),
 }
 
 // ── assistant metadata ───────────────────────────────────────────────────────

@@ -36,6 +36,8 @@ const PersonalizeScreen = lazy(() => import('./features/personalize/PersonalizeS
   .then(m => ({ default: m.PersonalizeScreen })))
 const TeamScreen = lazy(() => import('./features/team/TeamScreen')
   .then(m => ({ default: m.TeamScreen })))
+const MessagesScreen = lazy(() => import('./features/messages/MessagesScreen')
+  .then(m => ({ default: m.MessagesScreen })))
 const NotificationsScreen = lazy(() => import('./features/notifications/NotificationsScreen')
   .then(m => ({ default: m.NotificationsScreen })))
 const SettingsScreen = lazy(() => import('./features/settings/SettingsScreen')
@@ -102,6 +104,7 @@ export default function App() {
           {section === 'notes' && <NotesScreen />}
           {section === 'personalize' && <PersonalizeScreen />}
           {section === 'team' && <TeamScreen />}
+          {section === 'messages' && <MessagesScreen />}
           {section === 'notifications' && <NotificationsScreen onNavigate={navigate} />}
           {section === 'settings' && <SettingsScreen />}
         </Suspense>

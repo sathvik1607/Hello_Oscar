@@ -142,3 +142,32 @@ export const bytes = (n: number) =>
   n < 1024 ? `${n} B` :
   n < 1024 ** 2 ? `${(n / 1024).toFixed(0)} KB` :
   `${(n / 1024 ** 2).toFixed(1)} MB`
+
+/**
+ * "charan" → "Charan", "ALAN turing" → "Alan Turing". "You" stays "You".
+ *
+ * Ported from the Flutter `titleCaseName`. Names in this database are typed by
+ * people at signup, so they arrive lowercase, SHOUTING, or mixed — and a chat list
+ * of "charan / ALAN TURING / Priya" reads as broken data rather than as three
+ * colleagues.
+ */
+export function titleCaseName(name: string | null | undefined): string {
+  if (!name) return ''
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(w => w[0].toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ')
+}
+
+/** "today at 5:40 pm" / "yesterday at 5:40 pm" / "19 Aug at 5:40 pm" — the
+ *  last-seen line in a DM header. Same shape as the Flutter version. */
+export function lastSeenLabel(iso: string | null | undefined): string {
+  const d = iso ? new Date(iso) : null
+  if (!d || Number.isNaN(d.getTime())) return 'Offline'
+  const t = timeLabel(d)
+  if (isToday(d)) return `last seen today at ${t}`
+  const y = new Date(istNow().getTime() - 86_400_000)
+  if (istDateKey(d) === istDateKey(y)) return `last seen yesterday at ${t}`
+  return `last seen ${dayLabel(d)} at ${t}`
+}

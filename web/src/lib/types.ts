@@ -209,3 +209,28 @@ export type BusinessProfile = {
   capabilities: string[]
   getting_started: string[]
 }
+
+// ── messaging ───────────────────────────────────────────────────────────────
+
+export type ChatText = {
+  id: number
+  text: string
+  sender_id?: number
+  recipient_id?: number
+  /** Team messages use `user_id` for the author; DMs use `sender_id`. Both carry
+   *  `sender_name`, which is the field to render. */
+  user_id?: number
+  sender_name?: string | null
+  user_name?: string | null
+  reply_to_id: number | null
+  reply_to?: { id: number; author: string | null; text: string } | null
+  created_at: string | null
+}
+
+export type Conversations = {
+  /** Null for a personal account — there is no team group to show. */
+  team: { team_id: number; last_message_at: string | null; unread: number } | null
+  /** 🔴 Carries `peer_id` only, NOT a name. Names are resolved from
+   *  /teams/{id}/members — the backend does not join them here. */
+  dms: { peer_id: number; last_message_at: string | null; unread: number }[]
+}
