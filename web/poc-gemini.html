@@ -67,10 +67,18 @@
       <strong>headphones</strong> — the microphone stays open through the reply so that
       barge-in works, and on laptop speakers Gemini can hear itself and interrupt its own
       answer.
+      <br><br>
+      <strong>Tools:</strong> a <code>user_id</code> is required and the backend must run
+      with <code>GEMINI_LIVE_TOOLS=1</code>. Blank means Gemini can talk but cannot touch
+      the workspace — deliberately fail-closed, since every Oscar tool is scoped to a
+      user. <strong>Whatever id you enter acts for real</strong>: tasks are created,
+      notifications fire at that person's phone. The Log below prints every
+      <code>ask_oscar</code> round trip.
     </div>
 
     <div class="row">
       <input id="secret" type="password" placeholder="ADMIN_SECRET" size="22" />
+      <input id="uid" type="text" placeholder="user_id (for tools)" size="15" value="7" />
       <select id="voice">
         <option>Puck</option><option>Charon</option><option>Kore</option>
         <option>Fenrir</option><option>Aoede</option><option>Leda</option>

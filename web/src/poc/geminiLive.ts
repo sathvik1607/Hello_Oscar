@@ -11,10 +11,17 @@
  *   this file      ONE socket + mic
  *                  → no sentence splitting, no idle timers, no mic gate
  *
- * 🔴 NOT A REPLACEMENT AND NOT WIRED TO ANYTHING. No Oscar agent, no LangGraph,
- * no tools, no `/chat/stream`, no chat persistence. Nothing here imports
- * `liveVoice.ts` and nothing in the app imports this. It is reached only from
+ * 🔴 NOT A REPLACEMENT, AND STILL NOT WIRED INTO THE APP. Nothing here imports
+ * `liveVoice.ts` and nothing in the app imports this; it is reached only from
  * `poc-gemini.html`, which is not in the production build.
+ *
+ * ⚠️ As of Phase 2 it DOES reach the Oscar agent — but only through the relay's
+ * single `ask_oscar` bridge, and only when a `user_id` is supplied AND the backend
+ * runs with `GEMINI_LIVE_TOOLS=1`. This file declares no tools, names no tool, and
+ * cannot invoke one: it sees a `toolCall` frame only as something to display. The
+ * execution happens server-side, inside the LangGraph, so the confirmation gate
+ * and disambiguation still stand between a spoken sentence and a destructive
+ * write. `/chat/stream` and chat persistence remain untouched.
  *
  * WHAT IS REUSED VERBATIM from the shipping pipeline, because it already emits
  * exactly what the Live API wants: the capture chain. 16 kHz mono PCM16 in 100 ms
@@ -128,7 +135,11 @@ export class GeminiLive {
   readonly latencies: number[] = []
   /** Frames sent / audio chunks received — a stability signal that survives a
    *  session ending badly, unlike anything printed at the end. */
-  stats = { framesSent: 0, chunksIn: 0, turns: 0, interruptions: 0, errors: 0 }
+  stats = { framesSent: 0, chunksIn: 0, turns: 0, interruptions: 0, errors: 0, toolCalls: 0 }
+  /** How long the LangGraph took, separately from Gemini. Measured because the
+   *  bridge inverts the latency profile: Gemini answers in ~1.2 s and Oscar takes
+   *  ~5.6 s, so a tool turn is dominated by the agent, not by the voice layer. */
+  readonly toolMs: number[] = []
 
   constructor(url: string, h: GeminiHandlers) {
     this.url = url
@@ -183,6 +194,17 @@ export class GeminiLive {
     if (!msg) return
 
     if (msg.setupComplete) { this.h.onLog('setup complete — say something'); return }
+    // Not part of Google's protocol — the relay injects this so the page can show
+    // the bridge round trip. Without it a tool turn is just an unexplained pause,
+    // and "was that Gemini being slow or Oscar?" is the whole question.
+    if (msg.pocToolResult) {
+      const r = msg.pocToolResult
+      this.stats.toolCalls++
+      this.toolMs.push(r.ms)
+      this.h.onLog(`🔧 ask_oscar ${r.ms} ms — asked: ${JSON.stringify(r.request)} → `
+        + JSON.stringify(r.error ?? r.response))
+      return
+    }
     if (msg.goAway) {
       this.h.onLog(`goAway: server ending session (${JSON.stringify(msg.goAway)})`)
       return
@@ -346,6 +368,9 @@ export class GeminiLive {
       latencyP90: pct(0.9),
       latencyMax: l[l.length - 1] ?? null,
       latencies: l,
+      toolMs: this.toolMs,
+      toolMsMedian: this.toolMs.length
+        ? [...this.toolMs].sort((a, b) => a - b)[this.toolMs.length >> 1] : null,
     }
   }
 

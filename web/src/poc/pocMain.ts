@@ -60,8 +60,16 @@ async function start() {
   const voice = ($('voice') as HTMLSelectElement).value
   if (!k) { log('⚠️ ADMIN_SECRET required — the relay fails closed without it'); return }
 
+  // user_id is what arms the tool bridge. Omitted when blank rather than sent
+  // empty, because the relay treats "no user" as "no tools" and an empty string
+  // would read as a malformed id instead of an intentional opt-out.
+  const uid = ($('uid') as HTMLInputElement).value.trim()
   const url = `${wsBase}/voice/gemini/live?k=${encodeURIComponent(k)}&voice=${voice}`
+    + (uid ? `&user_id=${encodeURIComponent(uid)}` : '')
   log(`connecting → ${url.replace(/k=[^&]+/, 'k=***')}`)
+  log(uid
+    ? `tools ARMED for user ${uid} — actions are real (backend also needs GEMINI_LIVE_TOOLS=1)`
+    : 'no user_id → tools OFF, conversation only')
 
   live = new GeminiLive(url, {
     onState: setState,
