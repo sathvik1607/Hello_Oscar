@@ -230,7 +230,17 @@ export type ChatText = {
 export type Conversations = {
   /** Null for a personal account — there is no team group to show. */
   team: { team_id: number; last_message_at: string | null; unread: number } | null
-  /** 🔴 Carries `peer_id` only, NOT a name. Names are resolved from
-   *  /teams/{id}/members — the backend does not join them here. */
-  dms: { peer_id: number; last_message_at: string | null; unread: number }[]
+  dms: {
+    peer_id: number
+    /** The peer's real name, joined server-side. Before this existed the client had
+     *  to resolve names from /teams/{id}/members, which returns ACTIVE members only
+     *  — so a conversation with someone who had left the team rendered as
+     *  "User 87" and no client could do better. */
+    peer_name: string | null
+    /** False for a former teammate. Distinguishes "no longer here" from "offline",
+     *  which look identical otherwise. */
+    peer_active: boolean
+    last_message_at: string | null
+    unread: number
+  }[]
 }

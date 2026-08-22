@@ -50,11 +50,13 @@ export function MessagesScreen() {
     s => teamId ? teamApi.members(teamId, s) : Promise.resolve([]), [teamId], 'members')
 
   const nameOf = useCallback((id: number) => {
+    // The conversations payload carries the name now, and it is the ONLY source that
+    // works for someone who has left the team — the roster is active-members-only.
+    // Roster second, because it is the fresher of the two for current members.
     const m = (members.data ?? []).find(x => x.user_id === id)
-    // An id is a poor label, but it is honest — better than hiding a conversation
-    // because the person is no longer on the roster.
-    return titleCaseName(m?.name) || `User ${id}`
-  }, [members.data])
+    const fromConvo = (convos.data?.dms ?? []).find(d => d.peer_id === id)?.peer_name
+    return titleCaseName(m?.name) || titleCaseName(fromConvo) || `User ${id}`
+  }, [members.data, convos.data])
 
   const onlineOf = useCallback((id: number) => {
     const m = (members.data ?? []).find(x => x.user_id === id)
@@ -65,12 +67,16 @@ export function MessagesScreen() {
    *  "Team lead" is information; "Offline" repeats the dot that is already absent. */
   const subtitleOf = useCallback((id: number) => {
     const m = (members.data ?? []).find(x => x.user_id === id)
+    const convo = (convos.data?.dms ?? []).find(d => d.peer_id === id)
+    // A former teammate is not "Offline" — that implies they might come back online.
+    // Said plainly, so an old thread does not look like a live contact.
+    if (!m && convo && convo.peer_active === false) return 'No longer on the team'
     // Live state wins over the fetched row — that is the whole point of the overlay.
     const p = resolvePresence(live, id, m ?? {})
     if (p.online) return 'Online'
     if (p.last_seen) return lastSeenLabel(p.last_seen)
     return titleCaseName(m?.role?.replace(/_/g, ' ')) || 'Offline'
-  }, [members.data, live])
+  }, [members.data, convos.data, live])
 
   // A new message anywhere refreshes the list, so unread badges and ordering are
   // right without opening the thread.
@@ -81,9 +87,14 @@ export function MessagesScreen() {
   }), [reloadConvos])
 
   const dmPeers = useMemo(() => {
-    const fromConvos = (convos.data?.dms ?? []).map(d => d.peer_id)
-    // Everyone on the team is a possible DM, not only people already talked to —
-    // otherwise there is no way to start a first conversation.
+    // A former teammate is listed ONLY when there is real history — otherwise the
+    // list slowly fills with everyone who ever passed through the workspace. With
+    // history, hiding them would bury messages that still matter.
+    const fromConvos = (convos.data?.dms ?? [])
+      .filter(d => d.peer_active !== false || d.last_message_at)
+      .map(d => d.peer_id)
+    // Everyone currently on the team is a possible DM, not only people already
+    // talked to — otherwise there is no way to start a first conversation.
     const roster = (members.data ?? [])
       .filter(m => m.is_active && m.user_id !== me?.id)
       .map(m => m.user_id)
