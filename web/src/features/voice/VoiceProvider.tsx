@@ -5,7 +5,7 @@ import {
 import type { LiveVoice, Phase } from '../../lib/liveVoice'
 import { DEFAULT_SPEAKER } from '../../lib/speakers'
 import { isSignedIn } from '../../lib/session'
-import { VOICE_CHORD, VOICE_HOTKEY, useChord, useHotkey } from '../../lib/hotkeys'
+import { VOICE_HOTKEY, VOICE_TAP, useDoubleTap, useHotkey } from '../../lib/hotkeys'
 
 const VoiceOverlay = lazy(() => import('./VoiceOverlay')
   .then(m => ({ default: m.VoiceOverlay })))
@@ -226,9 +226,9 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     openVoice()
   }, [st.speaking, interrupt, closeVoice, openVoice])
 
-  // Space + V — the same on macOS and Windows, no modifier to relabel.
-  useChord(VOICE_CHORD, toggleVoice)
-  // Alt + V — the equivalent for anyone who would rather not involve the space bar.
+  // Shift Shift — nothing to intercept, identical on every platform.
+  useDoubleTap(VOICE_TAP, toggleVoice)
+  // ⇧⌘Space / Ctrl+Shift+Space — the held-combo equivalent.
   useHotkey(VOICE_HOTKEY, toggleVoice)
 
   const value = useMemo<Ctx>(() => ({

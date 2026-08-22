@@ -112,87 +112,93 @@ export function comboLabel(c: Combo): string {
 }
 
 /**
- * Talk to Oscar from anywhere: hold V, tap SPACE.
+ * Talk to Oscar from anywhere: tap SHIFT twice.
  *
- * Two plain keys, identical on macOS and Windows — no ⌥-versus-Alt to relabel, and
- * neither key is claimed by a browser or an OS.
+ * 🔴 THE REASON THIS IS THE RIGHT ONE: Shift on its own has NO default behaviour
+ * to intercept. Not in any browser, not on any OS. Every other candidate borrows a
+ * key that already does something and then has to fight it:
  *
- * 🔴 THE ORDER IS THE WHOLE DESIGN. Space-then-V was tried first and is wrong,
- * for two reasons:
+ *   Space          scrolls the page AND activates the focused control — so a chord
+ *                  starting with it can re-fire "Mark complete" or "Cancel task"
+ *   /              Firefox Quick Find
+ *   ⌘K / Ctrl+K    Chrome — search from the address bar
+ *   ⌘⇧O           Chrome — bookmark manager
+ *   Ctrl+J         Chrome — downloads
+ *   ⌘Space         macOS — Spotlight
+ *   Alt+Space      Windows — window menu
+ *   Ctrl+Space     macOS — switch input source
+ *   Alt+V          Firefox on Windows — View menu
  *
- *  1. Space scrolls the page. Survivable — the position can be restored.
- *  2. **Space activates the focused element.** After any click, focus stays on that
- *     control, so the chord would first re-click it — "Mark complete", "Send",
- *     "Cancel task". A shortcut that can fire a destructive action is not a
- *     shortcut. And it cannot be suppressed: preventDefault on Space is exactly how
- *     keyboard users activate buttons, so blocking it breaks accessibility.
+ * It is also the same on every platform, so there is no ⌥-versus-Alt to relabel and
+ * no modifier that means a different physical key somewhere else. And a double tap
+ * cannot happen by accident the way a single bare letter can, which matters when
+ * the action is "open the microphone".
  *
- * Flipping it removes both. Holding a letter outside a text field does nothing
- * whatsoever, and Space is now the SECOND key — so it can be preventDefault'd
- * safely, because that only happens while V is already held. Space on its own still
- * scrolls and still activates buttons, completely untouched.
+ * Precedent: JetBrains IDEs use Shift-Shift for Search Everywhere.
  */
-export const VOICE_CHORD = { hold: 'KeyV', key: 'Space' } as const
-export const VOICE_CHORD_LABEL = 'V + Space'
+export const VOICE_TAP = 'ShiftLeft'
+export const VOICE_TAP_LABEL = 'Shift Shift'
 
-/** The modifier alternative, for anyone who prefers one.
- *
- *  ⌘⇧Space / Ctrl+Shift+Space — mnemonic "press to talk", and free on both
- *  platforms. Alt+V was the first choice and was dropped: on Windows, Firefox binds
- *  Alt+V to the View menu, so it would have silently done nothing there. */
+/** The explicit alternative, for anyone who prefers a held combo.
+ *  ⇧⌘Space / Ctrl+Shift+Space — mnemonic "press to talk", free on both platforms. */
 export const VOICE_HOTKEY: Combo = { mod: true, shift: true, key: 'Space' }
 export const VOICE_HOTKEY_LABEL = comboLabel(VOICE_HOTKEY)
 
 /**
- * Hold one key, press another.
+ * Tap a modifier twice.
  *
- * Deliberately NOT symmetric: `hold` must already be down when `key` arrives.
- * Accepting either order would make a fast "v" then "space" while typing a
- * sentence — which is a real sequence in ordinary prose — fire the shortcut.
+ * Stricter than "two keydowns close together", because that would fire constantly
+ * during ordinary typing. A tap counts only when the key goes down and back up with
+ * NO other key pressed in between — so holding Shift to type a capital, or
+ * Shift+Tab, or any Shift combination, is not a tap. Two clean taps inside the
+ * window fire; anything else resets the count.
  */
-export function useChord(
-  /** `hold` and `key` are both KeyboardEvent.code values ('KeyV', 'Space'). Code
-   *  rather than key, because with a modifier down macOS reports the alternate
-   *  character and layouts differ. */
-  chord: { hold: string; key: string },
+export function useDoubleTap(
+  code: string,
   handler: () => void,
-  enabled = true,
+  { windowMs = 400, enabled = true }: { windowMs?: number; enabled?: boolean } = {},
 ) {
   const fn = useRef(handler)
   useEffect(() => { fn.current = handler }, [handler])
 
   useEffect(() => {
     if (!enabled) return
-    let holding = false
+    let lastTapAt = 0
+    /** True while the key is down and nothing else has been pressed since. */
+    let clean = false
 
     const onDown = (e: KeyboardEvent) => {
-      // Never in a text field: Space and V are both ordinary typing there, and
-      // firing would eat the keystroke AND open the microphone mid-sentence.
-      if (isEditing(e.target)) return
-
-      if (e.code === chord.hold) {
-        // Held, not consumed: a bare letter keypress outside a text field has no
-        // default behaviour to suppress.
-        holding = true
+      // Auto-repeat from a held key is not a tap.
+      if (e.repeat) return
+      if (e.code === code || e.code === code.replace('Left', 'Right')) {
+        clean = true
         return
       }
-      if (!holding) return
-      if (e.code !== chord.key) return
-      // A modifier held alongside means the user meant something else.
-      if (e.metaKey || e.ctrlKey || e.altKey) return
-
-      // Safe to suppress: this only runs while the hold key is already down, so
-      // Space pressed on its own keeps scrolling and keeps activating buttons.
-      e.preventDefault()
-      fn.current()
+      // Any other key while the modifier is down makes it a COMBINATION, not a tap
+      // — and also cancels a half-finished double tap.
+      clean = false
+      lastTapAt = 0
     }
 
     const onUp = (e: KeyboardEvent) => {
-      if (e.code === chord.hold) holding = false
+      if (e.code !== code && e.code !== code.replace('Left', 'Right')) return
+      if (!clean) { lastTapAt = 0; return }
+      clean = false
+
+      // Guarded on release rather than on press: the target is where focus is, and
+      // a shortcut must never fire while someone is typing.
+      if (isEditing(e.target)) { lastTapAt = 0; return }
+
+      const now = e.timeStamp
+      if (lastTapAt && now - lastTapAt <= windowMs) {
+        lastTapAt = 0
+        fn.current()
+      } else {
+        lastTapAt = now
+      }
     }
-    // A lost keyup — tab switch, window blur — would leave `holding` stuck true,
-    // and then a bare "v" would open the microphone.
-    const clear = () => { holding = false }
+
+    const clear = () => { clean = false; lastTapAt = 0 }
 
     window.addEventListener('keydown', onDown)
     window.addEventListener('keyup', onUp)
@@ -204,5 +210,6 @@ export function useChord(
       window.removeEventListener('blur', clear)
       document.removeEventListener('visibilitychange', clear)
     }
-  }, [chord.hold, chord.key, enabled])
+  }, [code, windowMs, enabled])
 }
+
