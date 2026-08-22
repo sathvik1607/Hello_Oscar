@@ -103,6 +103,32 @@ export function ChatScreen() {
           : x))
         break
 
+      /**
+       * 🔴 `chat.message.created` is DELIBERATELY NOT HANDLED, and this note exists
+       * so nobody adds it back thinking it was an oversight.
+       *
+       * It looks like the proactive-message channel — a scheduler reminder arriving
+       * while you have chat open. It is not usable for that, because the payload is
+       * `{message, user_id, message_id}` with NOTHING identifying what kind of
+       * thing it is, and `notification_service.send()` fires broadcast_chat for
+       * EVERY notification type. Verified against a running backend: sending a
+       * direct message produces `chat.message.created` alongside
+       * `direct.message.created`.
+       *
+       * So rendering it here would drop a teammate's DM into the Oscar transcript
+       * as though the assistant had said it. That is worse than missing reminders,
+       * which already reach the user three other ways — the Activity list, the nav
+       * badge and the tab title.
+       *
+       * `message_id` almost distinguishes them ("n:" notification, "c:" chat row),
+       * but the only "c:" case is the non-streaming POST /chat reply, which this
+       * screen already appends from the HTTP response — so handling it would
+       * double-render instead.
+       *
+       * To make this work the backend needs a `kind` (or the notification type) in
+       * the payload. Until then, not rendering is the correct behaviour.
+       */
+
       case 'chat.complete':
         // REPLACE, never append. Deltas may have arrived, or may not have; either
         // way this text is the answer.

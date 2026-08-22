@@ -28,6 +28,20 @@ type Handler = (f: Frame) => void
 
 const handlers = new Set<Handler>()
 const stateWatchers = new Set<(s: ConnState) => void>()
+/**
+ * Called after a DROPPED connection comes back — never on the first connect.
+ *
+ * 🔴 This exists because frames sent while the socket was down are GONE. The
+ * backend replays only unread `direct_message` on reconnect; a task completed, a
+ * comment posted or a meeting cancelled during a thirty-second drop is never
+ * re-sent. Without this the app sits on silently stale data and looks fine, which
+ * is the worst failure mode available — the user has no reason to reload.
+ *
+ * Separate from `watchConnection` on purpose: "are we connected" and "did we miss
+ * something" are different questions, and a screen that refetched on every state
+ * change would refetch on the first connect too, doubling every page load.
+ */
+const recoveryWatchers = new Set<() => void>()
 
 let ws: WebSocket | null = null
 let state: ConnState = 'closed'
@@ -78,8 +92,16 @@ function open() {
   ws = sock
 
   sock.onopen = () => {
+    // `retries > 0` is precisely "this is a RE-connect". On a first connect the
+    // screens have just fetched, so firing recovery would be a wasted round trip.
+    const recovered = retries > 0
     retries = 0
     setState('open')
+    if (recovered) {
+      recoveryWatchers.forEach(f => {
+        try { f() } catch (e) { console.error('[ws] recovery handler threw', e) }
+      })
+    }
   }
 
   sock.onmessage = e => {
@@ -128,10 +150,35 @@ export function subscribe(h: Handler): () => void {
   }
 }
 
+/** Subscribe to "the connection dropped and came back — refetch". */
+export function onRecovered(f: () => void): () => void {
+  recoveryWatchers.add(f)
+  return () => { recoveryWatchers.delete(f) }
+}
+
 export function watchConnection(f: (s: ConnState) => void): () => void {
   stateWatchers.add(f)
   f(state)                                 // current state immediately, not on next change
   return () => { stateWatchers.delete(f) }
+}
+
+/**
+ * Send a frame to the server.
+ *
+ * The socket has only ever RECEIVED until now; typing is the first thing the
+ * client tells the server over it. Fire-and-forget by design: the return value says
+ * whether it went out, and no caller should care — a dropped typing signal is
+ * invisible, whereas an error path for one would be noise. Anything that must not
+ * be lost belongs in an HTTP request, not here.
+ */
+export function send(frame: Record<string, unknown>): boolean {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false
+  try {
+    ws.send(JSON.stringify(frame))
+    return true
+  } catch {
+    return false
+  }
 }
 
 export function close() {

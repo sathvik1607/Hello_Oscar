@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { applyTheme, isSignedIn, onSessionChange } from './lib/session'
-import { reset as resetSocket, subscribe } from './lib/appSocket'
+import { reset as resetSocket } from './lib/appSocket'
+import { useUnreadCount } from './lib/unread'
 import { AppShell } from './shell/AppShell'
 import type { SectionId } from './shell/nav'
 import { NAV } from './shell/nav'
@@ -116,30 +117,17 @@ export default function App() {
 /**
  * Unread count in the tab title.
  *
- * Mounted at the root so ONE subscription serves the whole app. Counting inside the
- * Notifications screen instead would mean the badge only worked while you were
- * looking at the badge.
+ * Reads the SAME hook the nav badge uses, so the two can never disagree. It kept
+ * its own counter before, which meant a reload reset the title to zero while the
+ * badge showed the real number.
  */
 function LiveTitle() {
-  const [unread, setUnread] = useState(0)
-
-  useEffect(() => subscribe(f => {
-    if (f.type === 'notification.created') setUnread(n => n + 1)
-  }), [])
+  const unread = useUnreadCount()
 
   useEffect(() => {
     const base = document.title.replace(/^\(\d+\)\s*/, '')
     document.title = unread > 0 ? `(${unread}) ${base}` : base
   }, [unread])
-
-  // Opening Activity is the natural "I have seen these" signal.
-  useEffect(() => {
-    const onHash = () => {
-      if (location.hash.includes('notifications')) setUnread(0)
-    }
-    window.addEventListener('hashchange', onHash)
-    return () => window.removeEventListener('hashchange', onHash)
-  }, [])
 
   return null
 }

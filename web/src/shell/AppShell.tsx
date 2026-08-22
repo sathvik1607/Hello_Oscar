@@ -5,6 +5,7 @@ import { ConnectionBanner } from './ConnectionBanner'
 import { OscarButton } from '../features/voice/OscarButton'
 import { AmbientIndicator } from '../features/voice/AmbientIndicator'
 import { getUser, signOut } from '../lib/session'
+import { useUnreadCount } from '../lib/unread'
 import { cx } from '../ui'
 
 /**
@@ -24,6 +25,9 @@ export function AppShell({ section, onNavigate, children }: {
   children: React.ReactNode
 }) {
   const user = getUser()
+  // One subscription for the whole app — a count owned by the Activity screen only
+  // works while you are looking at the Activity screen.
+  const unread = useUnreadCount()
   const [railOpen, setRailOpen] = useState(false)     // tablet drawer
   const [moreOpen, setMoreOpen] = useState(false)     // mobile sheet
   const hasTeam = !!user?.team_id
@@ -80,7 +84,9 @@ export function AppShell({ section, onNavigate, children }: {
 
         <nav className="space-y-0.5" aria-label="Main">
           {items.map(n => (
-            <NavRow key={n.id} item={n} active={section === n.id} onClick={() => go(n.id)} />
+            <NavRow key={n.id} item={n} active={section === n.id}
+                    badge={n.id === 'notifications' ? unread : 0}
+                    onClick={() => go(n.id)} />
           ))}
         </nav>
 
@@ -166,8 +172,11 @@ export function AppShell({ section, onNavigate, children }: {
           <TabButton key={n.id} label={n.label} icon={<n.icon className="size-[18px]" />}
                      active={section === n.id} onClick={() => go(n.id)} />
         ))}
+        {/* A dot, not a count: a number is unreadable at this size, and the useful
+            signal is "there is something", not "there are seven". */}
         <TabButton label="More" icon={<MoreHorizontal className="size-[18px]" />}
                    active={secondary.some(s => s.id === section)}
+                   dot={unread > 0}
                    onClick={() => setMoreOpen(v => !v)} />
       </nav>
 
@@ -191,7 +200,9 @@ export function AppShell({ section, onNavigate, children }: {
             <div className="mx-auto mb-3 h-1 w-9 rounded-full"
                  style={{ background: 'var(--border-strong)' }} />
             {secondary.map(n => (
-              <NavRow key={n.id} item={n} active={section === n.id} onClick={() => go(n.id)} />
+              <NavRow key={n.id} item={n} active={section === n.id}
+                      badge={n.id === 'notifications' ? unread : 0}
+                      onClick={() => go(n.id)} />
             ))}
             <button onClick={signOut}
                     className="mt-1 w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium"
@@ -205,8 +216,8 @@ export function AppShell({ section, onNavigate, children }: {
   )
 }
 
-function NavRow({ item, active, onClick }: {
-  item: typeof NAV[number]; active: boolean; onClick: () => void
+function NavRow({ item, active, badge = 0, onClick }: {
+  item: typeof NAV[number]; active: boolean; badge?: number; onClick: () => void
 }) {
   return (
     <button
@@ -219,19 +230,37 @@ function NavRow({ item, active, onClick }: {
         : { color: 'var(--text-muted)' }}
     >
       <item.icon className="size-[17px] shrink-0" />
-      {item.label}
+      <span className="flex-1 text-left">{item.label}</span>
+      {badge > 0 && (
+        <span className="min-w-[20px] rounded-full px-1.5 py-0.5 text-center
+                         text-[11px] font-bold tabular-nums text-white"
+              style={{ background: 'var(--accent)' }}
+              aria-label={`${badge} unread`}>
+          {badge > 99 ? '99+' : badge}
+        </span>
+      )}
     </button>
   )
 }
 
-function TabButton({ label, icon, active, onClick }: {
-  label: string; icon: React.ReactNode; active: boolean; onClick: () => void
+function TabButton({ label, icon, active, dot, onClick }: {
+  label: string; icon: React.ReactNode; active: boolean; dot?: boolean
+  onClick: () => void
 }) {
   return (
     <button onClick={onClick} aria-current={active ? 'page' : undefined}
-            className="flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[10px] font-medium transition"
+            className="relative flex flex-1 flex-col items-center gap-0.5 py-2.5
+                       text-[10px] font-medium transition"
             style={{ color: active ? 'var(--accent)' : 'var(--text-subtle)' }}>
-      {icon}{label}
+      <span className="relative">
+        {icon}
+        {dot && (
+          <span className="absolute -right-1 -top-0.5 size-2 rounded-full"
+                style={{ background: 'var(--accent)',
+                         outline: '2px solid var(--bg-elevated)' }} />
+        )}
+      </span>
+      {label}
     </button>
   )
 }

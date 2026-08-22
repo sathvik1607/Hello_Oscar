@@ -7,6 +7,8 @@ import { useApi } from '../../lib/useApi'
 import { getUser } from '../../lib/session'
 import { subscribe } from '../../lib/appSocket'
 import { lastSeenLabel, messageTime, titleCaseName } from '../../lib/format'
+import { resolvePresence, usePresence } from '../../lib/presence'
+import { usePeerTyping, useTypingSignal } from '../../lib/typing'
 import type { ChatText } from '../../lib/types'
 import { Avatar } from '../../shell/AppShell'
 import {
@@ -41,6 +43,7 @@ export function MessagesScreen() {
   const teamId = me?.team_id ?? null
   const [open, setOpen] = useState<Open>(null)
 
+  const live = usePresence()
   const convos = useApi(s => msgApi.conversations(s), [], 'conversations')
   const reloadConvos = convos.reload
   const members = useApi(
@@ -53,17 +56,21 @@ export function MessagesScreen() {
     return titleCaseName(m?.name) || `User ${id}`
   }, [members.data])
 
-  const onlineOf = useCallback((id: number) =>
-    (members.data ?? []).find(x => x.user_id === id)?.online ?? false, [members.data])
+  const onlineOf = useCallback((id: number) => {
+    const m = (members.data ?? []).find(x => x.user_id === id)
+    return resolvePresence(live, id, m ?? {}).online
+  }, [members.data, live])
 
   /** Flutter shows the ROLE when someone is offline, not the word "Offline" —
    *  "Team lead" is information; "Offline" repeats the dot that is already absent. */
   const subtitleOf = useCallback((id: number) => {
     const m = (members.data ?? []).find(x => x.user_id === id)
-    if (m?.online) return 'Online'
-    if (m?.last_seen) return lastSeenLabel(m.last_seen)
+    // Live state wins over the fetched row — that is the whole point of the overlay.
+    const p = resolvePresence(live, id, m ?? {})
+    if (p.online) return 'Online'
+    if (p.last_seen) return lastSeenLabel(p.last_seen)
     return titleCaseName(m?.role?.replace(/_/g, ' ')) || 'Offline'
-  }, [members.data])
+  }, [members.data, live])
 
   // A new message anywhere refreshes the list, so unread badges and ordering are
   // right without opening the thread.
@@ -254,6 +261,12 @@ function Thread({ open, title, subtitle, onBack, onRead }: {
   const [live, setLive] = useState<{ rows: ChatText[]; readUpTo: number }>(
     { rows: [], readUpTo: 0 })
 
+  // DMs only — the relay takes a single to_user_id, and "three people are typing"
+  // in a team channel is noise rather than information.
+  const peerId = isTeam ? null : open.peerId
+  const { onKeystroke, stopTyping } = useTypingSignal(peerId)
+  const peerTyping = usePeerTyping(peerId)
+
   const rows = useMemo(() => {
     const merged = [...(h.data?.messages ?? [])]
     const seen = new Set(merged.map(r => r.id))
@@ -351,10 +364,11 @@ function Thread({ open, title, subtitle, onBack, onRead }: {
       setLive(v => v.rows.some(r => r.id === row.id)
       ? v : { ...v, rows: [...v.rows, row] })
       setDraft(''); setReplyTo(null)
+      stopTyping()
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : String(e))
     } finally { setSending(false) }
-  }, [draft, sending, isTeam, open, replyTo])
+  }, [draft, sending, isTeam, open, replyTo, stopTyping])
 
   return (
     <Card className="flex h-[calc(100dvh-230px)] flex-col overflow-hidden lg:h-[calc(100dvh-190px)]">
@@ -391,6 +405,7 @@ function Thread({ open, title, subtitle, onBack, onRead }: {
                     onReply={() => setReplyTo(r)} />
           )
         })}
+        {peerTyping && <TypingBubble />}
         <div ref={endRef} />
       </div>
 
@@ -418,7 +433,7 @@ function Thread({ open, title, subtitle, onBack, onRead }: {
         <div className="flex items-end gap-2">
           <textarea
             value={draft}
-            onChange={e => setDraft(e.target.value)}
+            onChange={e => { setDraft(e.target.value); onKeystroke() }}
             onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() }
             }}
@@ -434,6 +449,26 @@ function Thread({ open, title, subtitle, onBack, onRead }: {
         </div>
       </div>
     </Card>
+  )
+}
+
+/** Three dots on the incoming side, shaped like an incoming bubble so it reads as
+ *  a message in progress rather than as a status line. */
+function TypingBubble() {
+  return (
+    <div className="flex justify-start" aria-live="polite" aria-label="Typing">
+      <div className="flex items-center gap-1 rounded-2xl rounded-bl-md px-3.5 py-3"
+           style={{ background: 'var(--bg-sunken)' }}>
+        {[0, 1, 2].map(i => (
+          <span key={i} className="size-1.5 rounded-full"
+                style={{
+                  background: 'var(--text-subtle)',
+                  animation: 'breathe 1.2s ease-in-out infinite',
+                  animationDelay: `${i * 0.16}s`,
+                }} />
+        ))}
+      </div>
+    </div>
   )
 }
 

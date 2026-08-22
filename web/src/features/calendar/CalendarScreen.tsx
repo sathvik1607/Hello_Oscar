@@ -4,7 +4,7 @@ import {
 } from 'lucide-react'
 import { meetings as meetingsApi, tasks as tasksApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
-import { useItemEvents } from '../../lib/itemEvents'
+import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
 import {
   dayLabel, istDateKey, istNow, monthYearLabel, parseIstNaive, timeLabel,
 } from '../../lib/format'
@@ -49,7 +49,10 @@ export function CalendarScreen() {
   const m = useApi(s => meetingsApi.all(s), [], 'meetings:all')
   const t = useApi(s => tasksApi.mine(s), [], 'tasks:mine')
 
-  useItemEvents(() => { m.reload(); t.reload() })
+  // A meeting scheduled by Oscar mid-conversation lands on the calendar while you
+  // are looking at it — and a dropped connection is caught up on reconnect.
+  useLiveData(ITEM_FRAMES, () => { m.reload(); t.reload() },
+              { invalidatePrefixes: ITEM_CACHES })
 
   // ── index everything by day, once ────────────────────────────────────────
   const byDay = useMemo(() => {

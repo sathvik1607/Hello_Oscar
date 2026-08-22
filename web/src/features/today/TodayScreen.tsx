@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { CalendarClock, CheckCircle2, Clock, Sparkles, Sun } from 'lucide-react'
 import { meetings as meetingsApi, tasks as tasksApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
-import { useItemEvents } from '../../lib/itemEvents'
+import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
 import { getUser } from '../../lib/session'
 import {
   dueLabel, isToday, istNow, parseIstNaive, timeLabel,
@@ -44,9 +44,10 @@ export function TodayScreen() {
 
   const { toggle, busyId, error: actionError } = useTaskActions(t.patch, t.reload)
 
-  // A task created on the phone, or by Oscar in chat, appears here without a
-  // refresh. The frames were already being sent; nothing was listening.
-  useItemEvents(() => { t.reload(); m.reload() })
+  // Live task/meeting frames, plus a refetch after any dropped connection —
+  // frames sent while the socket was down are never re-sent.
+  useLiveData(ITEM_FRAMES, () => { t.reload(); m.reload() },
+              { invalidatePrefixes: ITEM_CACHES })
 
   // Keyed on `t.data`, NOT on `t.data?.tasks ?? []`. That fallback allocates a new
   // array on every render, so the memo below it would recompute every time — and

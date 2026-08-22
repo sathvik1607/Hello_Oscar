@@ -2,8 +2,10 @@ import { useMemo, useState } from 'react'
 import { Circle, Users } from 'lucide-react'
 import { team as teamApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
+import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
 import { getUser } from '../../lib/session'
 import { messageTime } from '../../lib/format'
+import { resolvePresence, usePresence } from '../../lib/presence'
 import type { Task } from '../../lib/types'
 import { Avatar } from '../../shell/AppShell'
 import { TaskCard } from '../tasks/TaskCard'
@@ -42,13 +44,24 @@ export function TeamScreen() {
       : Promise.resolve({ count: 0, tasks: [] }),
     [teamId, selected])
 
+  // 🔴 This screen had NO live wiring at all, so a teammate completing a task or a
+  // new project task appearing showed nothing until you navigated away and back —
+  // on the one screen whose whole purpose is watching other people's work.
+  useLiveData(ITEM_FRAMES,
+              () => { projects.reload(); memberTasks.reload(); members.reload() },
+              { invalidatePrefixes: [...ITEM_CACHES, 'members'] })
+
+  // Live presence, overlaid on the fetched roster — see lib/presence.ts.
+  const live = usePresence()
+
   const roster = useMemo(
     () => (members.data ?? [])
       .filter(m => m.is_active)
+      .map(m => ({ ...m, ...resolvePresence(live, m.user_id, m) }))
       // Online first, then alphabetical. Sorting by join date puts whoever
       // registered first at the top forever, which carries no information.
       .sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name)),
-    [members.data])
+    [members.data, live])
 
   const shown = selected ? (memberTasks.data?.tasks ?? []) : (projects.data?.tasks ?? [])
   const activeShown = shown.filter(t => t.status !== 'cancelled')

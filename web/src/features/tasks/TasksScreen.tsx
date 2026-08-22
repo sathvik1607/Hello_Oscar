@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { CheckSquare, Plus } from 'lucide-react'
 import { tasks as tasksApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
-import { useItemEvents } from '../../lib/itemEvents'
+import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
 import type { Task } from '../../lib/types'
 import { BUCKET_META, BUCKET_ORDER, completedToday, groupTasks } from './buckets'
 import { TaskCard } from './TaskCard'
@@ -47,9 +47,8 @@ export function TasksScreen() {
   const source = tab === 'delegated' ? delegated : tab === 'done' ? doneAll : mine
   const { toggle, busyId, error: actionError } = useTaskActions(source.patch, source.reload)
 
-  // A task created on the phone, or by Oscar in chat, appears here without a
-  // refresh. The frames were already being sent; nothing was listening.
-  useItemEvents(() => { mine.reload(); source.reload() })
+  useLiveData(ITEM_FRAMES, () => { mine.reload(); source.reload() },
+              { invalidatePrefixes: ITEM_CACHES })
 
   // See TodayScreen: `?? []` allocates per render and would defeat this memo.
   const allMine = useMemo(() => mine.data?.tasks ?? [], [mine.data])
