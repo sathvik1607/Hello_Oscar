@@ -113,9 +113,12 @@ export function AuthScreen() {
             </Button>
           </form>
 
-          {/* The backend URL lives behind a disclosure rather than on the form. It is
-              needed constantly in development and never by a real user, and a URL
-              field on a login screen looks like a phishing page. */}
+          {/* 🔴 DEV ONLY. A URL field on a login page is what a phishing page looks
+              like, and on a deployed app it invites someone to point their session
+              at an arbitrary host. It is needed constantly in development and never
+              by a real user, so it is compiled out of a production build entirely
+              rather than merely hidden. */}
+          {import.meta.env.DEV && (
           <div className="mt-5 border-t pt-4" style={{ borderColor: 'var(--border)' }}>
             <button type="button" onClick={() => setShowAdvanced(v => !v)}
                     className="text-[11px] font-medium"
@@ -135,6 +138,7 @@ export function AuthScreen() {
               </div>
             )}
           </div>
+          )}
         </Card>
 
         <p className="mt-6 text-center text-[11px] leading-relaxed"
