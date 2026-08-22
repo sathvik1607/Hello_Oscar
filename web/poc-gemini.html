@@ -52,10 +52,13 @@
     </style>
   </head>
   <body>
-    <h1>Gemini 2.5 Flash Live — voice-to-voice POC</h1>
+    <h1>Gemini Live — voice-to-voice POC</h1>
     <div class="sub">
       mic → Gemini Live → speaker. One socket. No Oscar agent, no LangGraph, no tools,
-      nothing persisted.
+      nothing persisted. The MODEL is chosen server-side by <code>GEMINI_LIVE_MODEL</code>
+      (default <code>gemini-3.1-flash-live-preview</code>, which measured ~1.2 s to first
+      audio versus 3–5 s on the 2.5 native-audio models) — the browser cannot pick it,
+      because a client that could choose the model could bill a pricier one to our key.
     </div>
 
     <div class="warn">
