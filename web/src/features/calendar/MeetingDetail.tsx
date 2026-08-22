@@ -89,7 +89,9 @@ export function MeetingDetail({ meeting, onClose, onChanged }: {
           <IconButton label="Close" onClick={onClose}><X className="size-5" /></IconButton>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        {/* A flex COLUMN, so the comments block below can push itself to the bottom
+            when the thread is short — see the mt-auto on it. */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-4">
           {meeting.location && (
             <div className="mb-3 flex items-center gap-2 text-sm">
               <MapPin className="size-3.5 shrink-0" style={{ color: 'var(--text-subtle)' }} />
@@ -151,7 +153,21 @@ export function MeetingDetail({ meeting, onClose, onChanged }: {
 
           {err && <p className="mt-3 text-[13px]" style={{ color: '#DC2626' }}>{err}</p>}
 
-          <div className="mt-6">
+          {/*
+            * `mt-auto` is the fix for a void.
+            *
+            * With the composer correctly pinned to the bottom of the sheet, a
+            * one-comment thread left an enormous gap between the last comment and
+            * the input — the content sat at the top and the rest of a full-height
+            * sheet was empty. Every chat application solves this the same way: a
+            * short thread hugs the composer rather than clinging to the top, so the
+            * empty space ends up ABOVE the messages where it reads as headroom
+            * instead of as a rendering fault.
+            *
+            * It only takes effect when there is slack. Once the thread is long
+            * enough to overflow, this is inert and the region simply scrolls.
+            */}
+          <div className="mt-auto pt-6">
             <CommentList t={thread} />
           </div>
         </div>
