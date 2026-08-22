@@ -5,6 +5,7 @@ import {
 import type { LiveVoice, Phase } from '../../lib/liveVoice'
 import { DEFAULT_SPEAKER } from '../../lib/speakers'
 import { isSignedIn } from '../../lib/session'
+import { VOICE_HOTKEY, useHotkey } from '../../lib/hotkeys'
 
 const VoiceOverlay = lazy(() => import('./VoiceOverlay')
   .then(m => ({ default: m.VoiceOverlay })))
@@ -205,6 +206,25 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   }, [stop])
 
   const interrupt = useCallback(() => engine.current?.interrupt(), [])
+
+  /**
+   * The keyboard route in, from any screen.
+   *
+   * Three meanings in priority order, so one key covers the whole interaction
+   * without the user having to know which state they are in:
+   *   speaking  → interrupt (the same thing tapping the orb does)
+   *   open      → hide it again
+   *   otherwise → open and start listening
+   *
+   * Suppressed inside text fields by useHotkey, which matters more here than for
+   * any other shortcut: firing mid-sentence in the chat composer would open the
+   * microphone and eat the keystroke.
+   */
+  useHotkey(VOICE_HOTKEY, () => {
+    if (st.speaking) { interrupt(); return }
+    if (overlayRef.current) { closeVoice(); return }
+    openVoice()
+  })
 
   const value = useMemo<Ctx>(() => ({
     ...st, overlayOpen, ambient, openVoice, closeVoice, setAmbient,

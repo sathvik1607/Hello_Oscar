@@ -4,6 +4,7 @@ import { SPEAKERS } from '../../lib/speakers'
 import { useVoice } from './VoiceProvider'
 import { Button, Portal, cx } from '../../ui'
 import type { Phase } from '../../lib/liveVoice'
+import { VOICE_HOTKEY_LABEL } from '../../lib/hotkeys'
 
 /**
  * Full-screen voice. A VIEW over the provider's engine, not the owner of it —
@@ -28,6 +29,15 @@ const PHASE_COPY: Record<Phase, { title: string; hint: string }> = {
   listening: { title: 'Listening',    hint: `Say "${wakeWord()}…" then what you need` },
   thinking:  { title: 'Working on it', hint: 'Checking your tasks and calendar' },
   speaking:  { title: 'Speaking',     hint: 'Tap to interrupt' },
+}
+
+function Kbd({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="rounded px-1.5 py-0.5 text-[10px] font-semibold"
+         style={{ background: 'var(--bg-sunken)', color: 'var(--text-muted)' }}>
+      {children}
+    </kbd>
+  )
 }
 
 function wakeWord() {
@@ -58,6 +68,8 @@ export function VoiceOverlay() {
   }, [v, onOrbTap])
 
   const copy = PHASE_COPY[v.phase]
+  // Space is the in-overlay control: no modifier needed once you are already here,
+  // and it is the key your thumb is on. The global Alt+V still works too.
   // Capped, so a loud room cannot inflate the orb off the screen.
   const scale = v.phase === 'listening' ? 1 + Math.min(v.level * 5.5, 0.4) : 1
 
@@ -187,6 +199,13 @@ export function VoiceOverlay() {
                  asks you something.`
               : `The microphone is open while this is on screen. Start with
                  "${wakeWord()}", or just answer when it asks you something.`}
+          </p>
+          <p className="mx-auto mt-2 flex flex-wrap items-center justify-center gap-x-3
+                        gap-y-1 text-[11px]"
+             style={{ color: 'var(--text-subtle)' }}>
+            <span><Kbd>Space</Kbd> start or interrupt</span>
+            <span><Kbd>Esc</Kbd> close</span>
+            <span><Kbd>{VOICE_HOTKEY_LABEL}</Kbd> from anywhere</span>
           </p>
         </footer>
       </div>
