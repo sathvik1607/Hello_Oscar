@@ -6,7 +6,7 @@ and every notification, and the Sarvam relays carry all of voice.
 Run against a backend started with WEB_AUTH_ENFORCE=1:
     BASE=http://127.0.0.1:8099 EMAIL=… PASSWORD=… ./scripts/ws_smoke.py
 """
-import asyncio, json, os, sys, urllib.parse, urllib.request
+import asyncio, json, os, sys, urllib.error, urllib.parse, urllib.request
 
 BASE = os.environ.get("BASE", "http://127.0.0.1:8099").rstrip("/")
 WS = BASE.replace("http", "ws", 1)
@@ -18,11 +18,32 @@ try:
 except ImportError:
     sys.exit("needs `websockets` (already a backend dependency — run with its venv)")
 
-PASS = FAIL = 0
+PASS = FAIL = SKIP = 0
 def ok(m):
     global PASS; PASS += 1; print(f"  \033[32mok\033[0m   {m}")
 def bad(m):
     global FAIL; FAIL += 1; print(f"  \033[31mFAIL\033[0m {m}")
+def skip(m):
+    global SKIP; SKIP += 1; print(f"  \033[33mskip\033[0m {m}")
+
+
+def enforcing(uid: int) -> bool:
+    """Whether WEB_AUTH_ENFORCE is on.
+
+    The authorization assertions below only hold when it is. With it off — the
+    default, because the Flutter app sends no token — the ?user_id= door is open BY
+    DESIGN and every refusal check correctly fails. Reporting four failures for a
+    deliberate configuration is a test lying about its own preconditions, and that
+    is what trains people to ignore a red run.
+    """
+    req = urllib.request.Request(f"{BASE}/tasks/{uid}")
+    try:
+        with urllib.request.urlopen(req, timeout=20):
+            return False
+    except urllib.error.HTTPError as e:
+        return e.code == 401
+    except Exception:
+        return False
 def section(m): print(f"\n\033[1m{m}\033[0m")
 
 
@@ -94,6 +115,7 @@ async def main():
 
     # ── authorization on the socket ──────────────────────────────────────────
     section("3 · socket authorization")
+    enforced = enforcing(uid)
 
     async def refused(url, label):
         """Refused must mean the HANDSHAKE was rejected.
@@ -114,8 +136,13 @@ async def main():
         except Exception as e:
             ok(f"{label} — refused ({type(e).__name__})")
 
-    await refused(f"{WS}/ws?user_id={uid}", "no token")
-    await refused(f"{WS}/ws?user_id={uid}&t=forged", "forged token")
+    if enforced:
+        await refused(f"{WS}/ws?user_id={uid}", "no token")
+        await refused(f"{WS}/ws?user_id={uid}&t=forged", "forged token")
+    else:
+        skip("no-token / forged-token — WEB_AUTH_ENFORCE is off, ?user_id= open by design")
+    # This one holds either way: a token for user A must never open user B's feed,
+    # enforcement or not.
     await refused(f"{WS}/ws?user_id={uid + 1}&t={urllib.parse.quote(token)}",
                   "my token, someone else's user_id")
 
@@ -127,8 +154,12 @@ async def main():
            f"&endpointing=vad&silence_duration_ms=800")
     tts = f"{WS}/voice/sarvam/tts?model=bulbul:v3"
 
-    await refused(f"{stt}&t=forged&user_id={uid}", "STT relay, forged token")
-    await refused(f"{tts}&t=forged&user_id={uid}", "TTS relay, forged token")
+    if enforced:
+        await refused(f"{stt}&t=forged&user_id={uid}", "STT relay, forged token")
+        await refused(f"{tts}&t=forged&user_id={uid}", "TTS relay, forged token")
+    else:
+        skip("relay forged-token — WEB_AUTH_ENFORCE is off, the ?user_id= door is open")
+    # Unconditional, same reason as above.
     await refused(f"{stt}&t={urllib.parse.quote(token)}&user_id={uid + 1}",
                   "STT relay, token/user mismatch")
 
@@ -162,7 +193,10 @@ async def main():
         except Exception as e:
             bad(f"{name} relay valid token rejected: {type(e).__name__} {e}")
 
-    print(f"\n\033[1m{PASS} passed, {FAIL} failed\033[0m")
+    print(f"\n\033[1m{PASS} passed, {FAIL} failed, {SKIP} skipped\033[0m")
+    if SKIP:
+        print("Run the backend with WEB_AUTH_ENFORCE=1 to exercise the "
+              "authorization checks.")
     return 1 if FAIL else 0
 
 sys.exit(asyncio.run(main()))
