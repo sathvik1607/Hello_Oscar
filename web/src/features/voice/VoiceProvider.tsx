@@ -5,7 +5,7 @@ import {
 import type { LiveVoice, Phase } from '../../lib/liveVoice'
 import { DEFAULT_SPEAKER } from '../../lib/speakers'
 import { isSignedIn } from '../../lib/session'
-import { VOICE_HOTKEY, useHotkey } from '../../lib/hotkeys'
+import { VOICE_CHORD, VOICE_HOTKEY, useChord, useHotkey } from '../../lib/hotkeys'
 
 const VoiceOverlay = lazy(() => import('./VoiceOverlay')
   .then(m => ({ default: m.VoiceOverlay })))
@@ -220,11 +220,16 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
    * any other shortcut: firing mid-sentence in the chat composer would open the
    * microphone and eat the keystroke.
    */
-  useHotkey(VOICE_HOTKEY, () => {
+  const toggleVoice = useCallback(() => {
     if (st.speaking) { interrupt(); return }
     if (overlayRef.current) { closeVoice(); return }
     openVoice()
-  })
+  }, [st.speaking, interrupt, closeVoice, openVoice])
+
+  // Space + V — the same on macOS and Windows, no modifier to relabel.
+  useChord(VOICE_CHORD, toggleVoice)
+  // Alt + V — the equivalent for anyone who would rather not involve the space bar.
+  useHotkey(VOICE_HOTKEY, toggleVoice)
 
   const value = useMemo<Ctx>(() => ({
     ...st, overlayOpen, ambient, openVoice, closeVoice, setAmbient,

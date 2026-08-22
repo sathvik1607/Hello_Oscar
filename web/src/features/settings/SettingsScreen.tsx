@@ -8,7 +8,7 @@ import {
 import { reset as resetSocket, watchConnection, type ConnState } from '../../lib/appSocket'
 import { SPEAKERS } from '../../lib/speakers'
 import { useVoice } from '../voice/VoiceProvider'
-import { VOICE_HOTKEY_LABEL } from '../../lib/hotkeys'
+import { VOICE_CHORD_LABEL, VOICE_HOTKEY_LABEL } from '../../lib/hotkeys'
 import {
   Badge, Button, Card, Confirmation, Field, SectionHeading, cx, inputCls, inputStyle,
 } from '../../ui'
@@ -135,10 +135,17 @@ export function SettingsScreen() {
           <div className="flex items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5"
                style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}>
             <span className="text-[13px]">Talk to Oscar from any screen</span>
-            <kbd className="rounded px-2 py-1 text-[11px] font-semibold"
-                 style={{ background: 'var(--bg-sunken)', color: 'var(--text-muted)' }}>
-              {VOICE_HOTKEY_LABEL}
-            </kbd>
+            <span className="flex shrink-0 items-center gap-1.5">
+              <kbd className="rounded px-2 py-1 text-[11px] font-semibold"
+                   style={{ background: 'var(--bg-sunken)', color: 'var(--text-muted)' }}>
+                {VOICE_CHORD_LABEL}
+              </kbd>
+              <span className="text-[11px]" style={{ color: 'var(--text-subtle)' }}>or</span>
+              <kbd className="rounded px-2 py-1 text-[11px] font-semibold"
+                   style={{ background: 'var(--bg-sunken)', color: 'var(--text-muted)' }}>
+                {VOICE_HOTKEY_LABEL}
+              </kbd>
+            </span>
           </div>
 
           {/* ── ambient wake ─────────────────────────────────────────── */}
