@@ -60,10 +60,11 @@ export function useCommentThread(itemId: number, onPosted?: () => void) {
     reload()
   }), [itemId, reload])
 
-  const pick = useCallback(async (files: FileList | null) => {
-    if (!files?.length) return
+  /** Shared by the file picker, paste and drop. */
+  const upload = useCallback(async (files: File[]) => {
+    if (!files.length) return
     setErr(null)
-    for (const f of Array.from(files)) {
+    for (const f of files) {
       // Checked here so a 25 MB upload that was always going to be refused is not
       // sent. The server stays the authority — it magic-byte sniffs and blocks
       // executable signatures even inside text formats.
@@ -83,6 +84,52 @@ export function useCommentThread(itemId: number, onPosted?: () => void) {
       }
     }
   }, [itemId])
+
+  const pick = useCallback(
+    (list: FileList | null) => upload(list ? [...list] : []), [upload])
+
+  /**
+   * Paste a file — ⌘V / Ctrl+V.
+   *
+   * A screenshot is the obvious case and it needs no filename: the clipboard gives
+   * a File with a generic name (often "image.png"), which is why one is synthesised
+   * from the item and the time — a thread of four files all called "image.png" is
+   * unusable.
+   *
+   * `clipboardData.files` covers a file copied from Finder or Explorer;
+   * `clipboardData.items` covers a screenshot, which arrives as an item of kind
+   * "file" and is NOT always present in `.files`. Both are read, and duplicates
+   * cannot happen because a paste carries one or the other.
+   *
+   * preventDefault ONLY when something was actually attached, so pasting text into
+   * the composer still behaves exactly as it always did.
+   */
+  const paste = useCallback(async (e: React.ClipboardEvent) => {
+    const cd = e.clipboardData
+    if (!cd) return
+    const files: File[] = [...cd.files]
+    if (files.length === 0) {
+      for (const item of cd.items) {
+        if (item.kind !== 'file') continue
+        const f = item.getAsFile()
+        if (f) files.push(f)
+      }
+    }
+    if (files.length === 0) return          // plain text — leave the paste alone
+    e.preventDefault()
+
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+    const named = files.map((f, i) => {
+      // A pasted screenshot is called "image.png" every time. Renaming it here is
+      // the difference between a readable thread and four identical chips.
+      const generic = !f.name || /^image\.\w+$/i.test(f.name)
+      if (!generic) return f
+      const ext = (f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')
+      return new File([f], `pasted-${stamp}${files.length > 1 ? `-${i + 1}` : ''}.${ext}`,
+                      { type: f.type })
+    })
+    await upload(named)
+  }, [upload])
 
   const post = useCallback(async () => {
     const body = draft.trim()
@@ -109,7 +156,7 @@ export function useCommentThread(itemId: number, onPosted?: () => void) {
   return {
     me, comments, loading: c.loading, error: c.error, accessDenied, reload,
     draft, setDraft, sending, err, staged, setStaged, uploading,
-    pick, post, canSend,
+    pick, paste, post, canSend,
   }
 }
 
@@ -179,17 +226,18 @@ export function CommentComposer({ t }: { t: Thread }) {
                  e.target.value = ''
                }} />
         <Button onClick={() => fileInput.current?.click()}
-                aria-label="Attach a file" title="Attach a file (25 MB max)">
+                aria-label="Attach a file" title="Attach a file — or just paste one (25 MB max)">
           <Paperclip className="size-4" />
         </Button>
         <textarea
           value={t.draft}
           onChange={e => t.setDraft(e.target.value)}
+          onPaste={e => void t.paste(e)}
           onKeyDown={e => {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void t.post() }
           }}
           rows={1}
-          placeholder="Add a note or attach a file…"
+          placeholder="Add a note, or paste a screenshot…"
           className={cx(inputCls, 'max-h-32 min-h-[42px] resize-none py-2.5')}
           style={inputStyle}
         />
@@ -204,40 +252,59 @@ export function CommentComposer({ t }: { t: Thread }) {
 
 function Comment({ comment, mine }: { comment: TaskComment; mine: boolean }) {
   // 'assistant' rows are SYSTEM activity notes ("✅ Marked as completed by …")
-  // written by item_service.complete_item — not Oscar replies. Rendering them as
-  // chat from Oscar would claim the assistant said something it never did.
+  // written by item_service.complete_item — not Oscar replies. Centred and quiet,
+  // because they belong to neither side of the conversation.
   if (comment.role === 'assistant') {
     return (
-      <div className="flex items-center gap-2 px-1 text-[12.5px]"
+      <div className="flex items-center justify-center gap-2 px-1 text-[12.5px]"
            style={{ color: 'var(--text-subtle)' }}>
         <Sparkles className="size-3 shrink-0" />
-        <span className="min-w-0 flex-1">{comment.body}</span>
+        <span className="min-w-0">{comment.body}</span>
         <span className="shrink-0 tabular-nums">{messageTime(comment.created_at)}</span>
       </div>
     )
   }
 
+  /**
+   * Mine on the RIGHT, everyone else on the LEFT — the arrangement every messaging
+   * app uses, because it makes "who said this" answerable without reading a name.
+   * A thread of uniform left-aligned rows forces you to read the label on every
+   * line to follow a two-person exchange.
+   *
+   * The avatar is dropped on my own side: I know who I am, and it is the one piece
+   * of information the alignment already carries.
+   */
   return (
-    <div className="flex gap-2.5">
-      <Avatar name={comment.user_name ?? '?'} size={28} />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2">
-          <span className="text-[13px] font-semibold">
-            {mine ? 'You' : (comment.user_name ?? `User ${comment.user_id}`)}
-          </span>
+    <div className={cx('flex gap-2.5', mine ? 'justify-end' : 'justify-start')}>
+      {!mine && <Avatar name={comment.user_name ?? '?'} size={28} />}
+      <div className={cx('min-w-0 max-w-[82%]', mine && 'items-end text-right')}>
+        <div className={cx('flex items-baseline gap-2', mine && 'justify-end')}>
+          {/* No name on my own messages — the side already says it. */}
+          {!mine && (
+            <span className="text-[13px] font-semibold">
+              {comment.user_name ?? `User ${comment.user_id}`}
+            </span>
+          )}
           <span className="text-[11px] tabular-nums" style={{ color: 'var(--text-subtle)' }}>
             {messageTime(comment.created_at)}
           </span>
         </div>
-        {/* A file-only comment is legal, so the body renders only when present
-            rather than leaving an empty line above the chip. */}
+
+        {/* A file-only comment is legal, so the bubble renders only when there is
+            text — otherwise an empty bubble sits above the chip. */}
         {comment.body.trim() && (
-          <p className="mt-0.5 whitespace-pre-wrap break-words text-sm leading-relaxed">
-            {comment.body}
-          </p>
+          <div className={cx('mt-1 inline-block rounded-2xl px-3 py-2 text-left',
+                             'text-sm leading-relaxed',
+                             mine ? 'rounded-br-md' : 'rounded-bl-md')}
+               style={mine
+                 ? { background: 'var(--accent)', color: '#fff' }
+                 : { background: 'var(--bg-sunken)', color: 'var(--text)' }}>
+            <span className="whitespace-pre-wrap break-words">{comment.body}</span>
+          </div>
         )}
+
         {!!comment.attachments?.length && (
-          <div className="mt-2 space-y-1.5">
+          <div className={cx('mt-2 flex flex-col gap-1.5', mine && 'items-end')}>
             {comment.attachments.map(a => <AttachmentChip key={a.id} attachment={a} />)}
           </div>
         )}
