@@ -82,14 +82,17 @@ export function CalendarScreen() {
   const dayRows = useMemo(() => {
     const bag = byDay.get(selectedKey)
     if (!bag) return [] as Row[]
+    // Cancelled items are NOT filtered out. `DELETE /items` is a soft delete —
+    // status becomes 'cancelled' and the row survives precisely so the calendar
+    // can still show that the slot was claimed and then dropped. Hiding them makes
+    // a cancelled 3pm meeting indistinguishable from one that never existed, and
+    // the Flutter calendar renders them struck through for the same reason.
     const rows: Row[] = [
-      ...bag.meetings
-        .filter(x => x.status !== 'cancelled')
-        .map(x => ({ kind: 'meeting' as const, at: parseIstNaive(x.scheduled_at),
-                     end: parseIstNaive(x.ends_at), meeting: x })),
-      ...bag.tasks
-        .filter(x => x.status !== 'cancelled')
-        .map(x => ({ kind: 'task' as const, at: parseIstNaive(x.due_at), task: x })),
+      ...bag.meetings.map(x => ({
+        kind: 'meeting' as const, at: parseIstNaive(x.scheduled_at),
+        end: parseIstNaive(x.ends_at), meeting: x })),
+      ...bag.tasks.map(x => ({
+        kind: 'task' as const, at: parseIstNaive(x.due_at), task: x })),
     ]
     return rows.sort((a, b) => (a.at?.getTime() ?? 0) - (b.at?.getTime() ?? 0))
   }, [byDay, selectedKey])
@@ -269,8 +272,21 @@ function MeetingCard({ meeting, at, end, onOpen }: {
   const now = istNow()
   const live = !!at && !!end && at <= now && now <= end
   const past = !!end && end < now
+  /**
+   * 🔴 On a CALENDAR, strikethrough means "this did not happen" — so it is for
+   * `cancelled` only. A completed meeting genuinely took place; striking it out
+   * claims the opposite about your own history. Both closed states are dimmed, so
+   * neither reads as a live commitment.
+   *
+   * A task LIST uses the other rule — there, a ticked-off task is struck through,
+   * because that is what ticking something off looks like. Two surfaces, two
+   * meanings, and the Flutter app draws the same distinction.
+   */
+  const cancelled = meeting.status === 'cancelled'
+  const closed = cancelled || meeting.status === 'completed'
   return (
-    <Card className={cx('transition hover:brightness-[.98]', past && 'opacity-60')}>
+    <Card className={cx('transition hover:brightness-[.98]',
+                        (past || closed) && 'opacity-60')}>
       <button onClick={onOpen} className="flex w-full gap-3.5 p-3.5 text-left">
         <div className="w-[64px] shrink-0 text-right">
           <div className="text-[13px] font-semibold tabular-nums">{at ? timeLabel(at) : '—'}</div>
@@ -281,11 +297,15 @@ function MeetingCard({ meeting, at, end, onOpen }: {
           )}
         </div>
         <div className="w-[3px] shrink-0 rounded-full"
-             style={{ background: live ? '#22C55E' : '#4F46E5' }} />
+             style={{ background: cancelled ? '#94A3B8' : live ? '#22C55E' : '#4F46E5' }} />
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
-            <div className="text-[14.5px] font-medium leading-snug">{meeting.title}</div>
-            {live && <Badge tone="completed">Now</Badge>}
+            <div className={cx('text-[14.5px] font-medium leading-snug',
+                               cancelled && 'line-through')}>
+              {meeting.title}
+            </div>
+            {live && !closed && <Badge tone="completed">Now</Badge>}
+            {cancelled && <Badge tone="cancelled">Cancelled</Badge>}
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"
                style={{ color: 'var(--text-muted)' }}>
@@ -309,22 +329,37 @@ function MeetingCard({ meeting, at, end, onOpen }: {
 function TaskRow({ task, at, onOpen }: {
   task: Task; at: Date | null; onOpen: () => void
 }) {
+  // Same rule as the meeting above: struck through only when cancelled, dimmed
+  // when closed either way. See the comment on MeetingCard.
+  const cancelled = task.status === 'cancelled'
   const done = task.status === 'completed'
+  const closed = cancelled || done
   return (
-    <Card className={cx('transition hover:brightness-[.98]', done && 'opacity-55')}>
+    <Card className={cx('transition hover:brightness-[.98]', closed && 'opacity-55')}>
       <button onClick={onOpen} className="flex w-full gap-3.5 p-3.5 text-left">
         <div className="w-[64px] shrink-0 text-right text-[13px] font-semibold tabular-nums">
           {at ? timeLabel(at) : '—'}
         </div>
         <div className="w-[3px] shrink-0 rounded-full"
-             style={{ background: task.is_overdue ? '#EF4444' : '#22C55E' }} />
+             style={{
+               background: cancelled ? '#94A3B8'
+                 : done ? '#94A3B8'
+                 : task.is_overdue ? '#EF4444' : '#22C55E',
+             }} />
         <div className="min-w-0 flex-1">
-          <div className={cx('text-[14.5px] font-medium leading-snug', done && 'line-through')}>
+          <div className={cx('text-[14.5px] font-medium leading-snug',
+                             cancelled && 'line-through')}>
             {task.title}
           </div>
           <div className="mt-1 flex items-center gap-1.5">
-            <Badge tone="neutral">Deadline</Badge>
-            {task.is_overdue && <Badge tone="overdue">Overdue</Badge>}
+            {/* A finished deadline says "Done", not "Deadline" — the label should
+                describe the state, not repeat the row type on every line. */}
+            {done ? <Badge tone="completed">Done</Badge>
+              : cancelled ? <Badge tone="cancelled">Cancelled</Badge>
+              : <Badge tone="neutral">Deadline</Badge>}
+            {/* Overdue is irrelevant once a task is closed — the Flutter card
+                suppresses it the same way. */}
+            {task.is_overdue && !closed && <Badge tone="overdue">Overdue</Badge>}
           </div>
         </div>
       </button>

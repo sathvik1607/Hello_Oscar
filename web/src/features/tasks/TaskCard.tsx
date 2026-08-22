@@ -21,6 +21,9 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee }: {
 }) {
   const due = parseIstNaive(task.due_at)
   const done = task.status === 'completed'
+  // Flutter's `_isClosedState`. In a task LIST both closed states are struck
+  // through — that is what ticking something off looks like. (The CALENDAR uses
+  // the opposite rule for completed items; see CalendarScreen.)
   const terminal = done || task.status === 'cancelled'
   const shared = (task.assignee_count ?? task.assignees.length) > 1
 
@@ -45,7 +48,7 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee }: {
 
         <button onClick={onOpen} className="min-w-0 flex-1 text-left">
           <div className={cx('text-[14.5px] font-medium leading-snug',
-                             done && 'line-through')}>
+                             terminal && 'line-through')}>
             {task.title}
           </div>
 
