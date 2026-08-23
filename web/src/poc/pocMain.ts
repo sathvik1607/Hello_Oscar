@@ -13,6 +13,7 @@
  */
 
 import { GeminiLive } from './geminiLive'
+import type { Turn } from './geminiLive'
 
 const $ = (id: string) => document.getElementById(id)!
 const backend = (import.meta.env.VITE_BACKEND_URL as string) || 'http://localhost:8000'
@@ -34,14 +35,28 @@ function setState(s: string) {
   $('orb').className = `orb ${s}`
 }
 
-function renderTurn(t: { heard: string; said: string; latencyMs: number | null; interrupted: boolean }) {
+function renderTurn(t: Turn) {
   const row = document.createElement('div')
   row.className = 'turn'
+  // first / final are shown SEPARATELY on purpose: with non-blocking, first-audio
+  // can look excellent while the real answer is still seconds behind it. One
+  // blended number would hide exactly the thing being evaluated.
+  const flags = [
+    t.spokeBeforeTool === true ? '<b style="color:#4ade80">spoke before tool ✓</b>' : '',
+    t.spokeBeforeTool === false ? '<span style="color:#fbbf24">waited for tool</span>' : '',
+    t.secondBurst ? '<span style="color:#7aa2f7">2nd burst</span>' : '',
+    t.interrupted ? '<span style="color:#f87171">barge-in</span>' : '',
+  ].filter(Boolean).join(' · ')
   row.innerHTML = `
-    <div class="lat">${t.latencyMs != null ? t.latencyMs + ' ms' : (t.interrupted ? 'barge-in' : '—')}</div>
+    <div class="lat">
+      ${t.latencyMs != null ? t.latencyMs + ' ms' : '—'}
+      <div style="font-weight:400;color:#8b93a7">final ${t.finalMs ?? '—'}</div>
+      ${t.toolMs != null ? `<div style="font-weight:400;color:#8b93a7">tool ${t.toolMs}</div>` : ''}
+    </div>
     <div>
       <div class="heard">🎤 ${t.heard || '(no transcript)'}</div>
       <div class="said">🔊 ${t.said || '(no transcript)'}</div>
+      ${flags ? `<div style="font-size:11px;margin-top:3px">${flags}</div>` : ''}
     </div>`
   $('turns').prepend(row)
   refreshSummary()

@@ -59,6 +59,19 @@ const OBSERVER_SILENCE_MS = 500
 const OBSERVER_RMS = 0.012
 
 export type Turn = {
+  /** ms from speech end to the LAST audio chunk of the reply. With blocking calls
+   *  this is what the user actually waits for; first-audio alone can look fast
+   *  while the real answer is still seconds away. */
+  finalMs?: number | null
+  /** 🔴 THE METRIC THAT PROVES NON_BLOCKING. True when Gemini began speaking
+   *  BEFORE the tool result came back — i.e. it filled the silence instead of
+   *  sitting in it. False means the flag changed nothing observable. */
+  spokeBeforeTool?: boolean | null
+  /** Audio began again after the tool result landed — the "correcting itself"
+   *  half of non-blocking. Two bursts is expected and correct; what is NOT
+   *  acceptable is two bursts that OVERLAP. */
+  secondBurst?: boolean | null
+  toolMs?: number | null
   /** What Gemini heard, from `inputTranscription`. */
   heard: string
   /** What Gemini said, from `outputTranscription`. */
@@ -130,6 +143,16 @@ export class GeminiLive {
   private speechEndAt: number | null = null
   private awaitingAudio = false
   private turn: Turn = { heard: '', said: '', latencyMs: null, interrupted: false }
+  // Per-turn ordering state. All of it exists to answer one question: did audio
+  // start before or after the tool answered?
+  private toolAtMs: number | null = null
+  private firstAudioAtMs: number | null = null
+  private bursts = 0
+  private speaking = false
+  /** 🔴 Overlapping speech: a new burst starting while the previous one is still
+   *  playing. The ring buffer would mix them into gibberish, so this is the
+   *  failure mode that would disqualify non-blocking outright. */
+  overlaps = 0
   /** Every completed turn's latency, so the report quotes a distribution and not
    *  one lucky number. */
   readonly latencies: number[] = []
@@ -201,6 +224,11 @@ export class GeminiLive {
       const r = msg.pocToolResult
       this.stats.toolCalls++
       this.toolMs.push(r.ms)
+      this.toolAtMs = performance.now()
+      this.turn.toolMs = r.ms
+      // Ordering, decided by wall clock rather than by hope.
+      this.turn.spokeBeforeTool = this.firstAudioAtMs != null
+      if (this.firstAudioAtMs != null) this.bursts = 1   // a later burst = the correction
       this.h.onLog(`🔧 ask_oscar ${r.ms} ms — asked: ${JSON.stringify(r.request)} → `
         + JSON.stringify(r.error ?? r.response))
       return
@@ -260,6 +288,9 @@ export class GeminiLive {
       this.h.onTurn({ ...this.turn })
       if (this.turn.latencyMs != null) this.latencies.push(this.turn.latencyMs)
       this.turn = { heard: '', said: '', latencyMs: null, interrupted: false }
+      this.toolAtMs = null
+      this.firstAudioAtMs = null
+      this.bursts = 0
       // Deliberately NOT setting state to 'listening' here: turnComplete means
       // generation finished, not that playback did. The buffer's drain event is
       // the honest end of speaking.
@@ -267,6 +298,18 @@ export class GeminiLive {
   }
 
   private onAudioStart() {
+    if (this.speaking) {
+      this.overlaps++
+      this.h.onLog(`🔴 OVERLAPPING SPEECH — a new burst began while the previous `
+        + `one was still playing. This is the failure mode that disqualifies `
+        + `non-blocking.`)
+    }
+    this.speaking = true
+    if (this.firstAudioAtMs == null) this.firstAudioAtMs = performance.now()
+    else if (this.toolAtMs != null) {
+      this.turn.secondBurst = true
+      this.h.onLog('↩ second burst after the tool result — Gemini correcting itself')
+    }
     if (this.awaitingAudio && this.speechEndAt != null) {
       this.turn.latencyMs = Math.round(performance.now() - this.speechEndAt)
       this.h.onLog(`⏱ first audio ${this.turn.latencyMs} ms after you stopped speaking`)
@@ -276,6 +319,12 @@ export class GeminiLive {
   }
 
   private onAudioDrain() {
+    this.speaking = false
+    // Drain is the honest end of the ANSWER, not turnComplete — generation can
+    // finish while seconds of audio are still queued.
+    if (this.speechEndAt != null) {
+      this.turn.finalMs = Math.round(performance.now() - this.speechEndAt)
+    }
     if (this.running) this.h.onState('listening')
   }
 
@@ -368,6 +417,7 @@ export class GeminiLive {
       latencyP90: pct(0.9),
       latencyMax: l[l.length - 1] ?? null,
       latencies: l,
+      overlaps: this.overlaps,
       toolMs: this.toolMs,
       toolMsMedian: this.toolMs.length
         ? [...this.toolMs].sort((a, b) => a - b)[this.toolMs.length >> 1] : null,
