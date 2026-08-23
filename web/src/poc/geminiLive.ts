@@ -227,8 +227,12 @@ export class GeminiLive {
       this.turn.toolMs = r.ms
       // Ordering, decided by wall clock rather than by hope.
       this.turn.spokeBeforeTool = this.firstAudioAtMs != null
-      this.h.onLog(`🔧 ask_oscar ${r.ms} ms — asked: ${JSON.stringify(r.request)} → `
-        + JSON.stringify(r.error ?? r.response))
+      // `r.raw` is the tool's whole return value. The old version read only
+      // `response`/`error`, which direct-mode results do not carry — so every
+      // successful call displayed "null" and looked like a failure.
+      const shown = r.error ?? r.response ?? r.raw
+      this.h.onLog(`🔧 ${r.ms} ms — ${JSON.stringify(r.request)} → `
+        + JSON.stringify(shown).slice(0, 160))
       return
     }
     if (msg.goAway) {
@@ -236,10 +240,19 @@ export class GeminiLive {
       return
     }
     if (msg.toolCall) {
-      // Cannot happen — no tools are declared. Logged loudly because if it ever
-      // does, it means a tool ran outside the LangGraph, which is the exact
-      // hazard Phase 2 has to solve before tools are connected.
-      this.h.onLog(`⚠️ UNEXPECTED toolCall: ${JSON.stringify(msg.toolCall)}`)
+      // Written when NO tools were declared, where any toolCall really was a
+      // surprise. In direct mode tools ARE declared, so it fired on every healthy
+      // turn and made a working session look broken. Now it reports the CALL,
+      // and flags only the thing that is genuinely suspicious: more than one
+      // function in a single frame, which is how duplicate tasks get created.
+      const fc = msg.toolCall.functionCalls ?? []
+      const names = fc.map((f: any) => f.name).join(', ')
+      if (fc.length > 1) {
+        this.h.onLog(`⚠️ ${fc.length} tool calls in ONE frame: ${names} — `
+          + `duplicates are likely`)
+      } else {
+        this.h.onLog(`→ tool call: ${names}`)
+      }
       return
     }
     if (msg.usageMetadata) {
