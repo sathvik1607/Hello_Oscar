@@ -16,8 +16,11 @@
  * so a late chunk is a brief underrun that fills back in rather than a click.
  *
  * The worklet is compiled from a Blob URL rather than shipped as a separate file:
- * `addModule` needs a real URL, and a POC that must not touch the build config
- * cannot add an entry to `public/`. Same code, no build change.
+ * `addModule` needs a real URL, and adding an entry to `public/` would be a build
+ * change for no benefit. Same code, no build config.
+ *
+ * Lives in `lib/` because BOTH the app engine (`geminiVoice.ts`) and the POC page
+ * use it. Two copies would mean a bug fixed in one surviving in the other.
  */
 
 /** Fixed by the Live API — not a preference. Playing 24 kHz audio through a

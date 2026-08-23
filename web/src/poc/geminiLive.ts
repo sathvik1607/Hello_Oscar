@@ -33,7 +33,7 @@
  * transcribe as `"Rem, Rem, Rem"` and the socket reports no error at all.
  */
 
-import { GEMINI_OUTPUT_RATE, PcmPlayer } from './pcmPlayer'
+import { GEMINI_OUTPUT_RATE, PcmPlayer } from '../lib/pcmPlayer'
 
 const FRAME_MS = 100
 /** Gemini's input rate. Fixed by the API — `audio/pcm;rate=16000` is asserted in

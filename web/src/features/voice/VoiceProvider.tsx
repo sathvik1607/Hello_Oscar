@@ -2,7 +2,7 @@ import {
   createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo,
   useRef, useState,
 } from 'react'
-import type { LiveVoice, Phase } from '../../lib/liveVoice'
+import type { Phase } from '../../lib/liveVoice'
 import { DEFAULT_SPEAKER } from '../../lib/speakers'
 import { isSignedIn } from '../../lib/session'
 import { VOICE_HOTKEY, VOICE_TAP, useDoubleTap, useHotkey } from '../../lib/hotkeys'
@@ -89,7 +89,15 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     error: null, running: false, speaking: false, needsGesture: false,
   })
 
-  const engine = useRef<LiveVoice | null>(null)
+  /** Either engine. Structurally typed rather than tied to one class, because the
+   *  swap is the point: if a future engine satisfies this shape it drops in too. */
+  type Engine = {
+    readonly isRunning: boolean
+    start(): Promise<void>
+    stop(): void
+    interrupt(): void
+  }
+  const engine = useRef<Engine | null>(null)
   /** Guards against two concurrent starts. `start()` awaits a dynamic import, so a
    *  fast double-tap could otherwise get two engines — two microphones, two STT
    *  sockets, both billing. */
@@ -112,8 +120,15 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     // Imported on demand: the engine is ~1,000 lines of audio code and most page
     // loads never open a microphone. Ambient mode pays this on load, which is the
     // user's own choice rather than everyone's default.
-    const { LiveVoice } = await import('../../lib/liveVoice')
-    const lv = new LiveVoice({
+    // 🔴 ENGINE CHOICE. Gemini by default; `VITE_VOICE_ENGINE=sarvam` restores the
+    // previous path. Both implement the same `Handlers` contract, so nothing below
+    // this line differs between them — which is also why switching back is an env
+    // var and a reload rather than a revert.
+    const useSarvam = (import.meta.env.VITE_VOICE_ENGINE as string) === 'sarvam'
+    const Engine = useSarvam
+      ? (await import('../../lib/liveVoice')).LiveVoice
+      : (await import('../../lib/geminiVoice')).GeminiVoice
+    const lv = new Engine({
       onPhase: p => setSt(s => ({
         ...s, phase: p, running: true,
         speaking: p === 'speaking',
