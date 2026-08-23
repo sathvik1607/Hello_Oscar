@@ -147,7 +147,6 @@ export class GeminiLive {
   // start before or after the tool answered?
   private toolAtMs: number | null = null
   private firstAudioAtMs: number | null = null
-  private bursts = 0
   private speaking = false
   /** 🔴 Overlapping speech: a new burst starting while the previous one is still
    *  playing. The ring buffer would mix them into gibberish, so this is the
@@ -228,7 +227,6 @@ export class GeminiLive {
       this.turn.toolMs = r.ms
       // Ordering, decided by wall clock rather than by hope.
       this.turn.spokeBeforeTool = this.firstAudioAtMs != null
-      if (this.firstAudioAtMs != null) this.bursts = 1   // a later burst = the correction
       this.h.onLog(`🔧 ask_oscar ${r.ms} ms — asked: ${JSON.stringify(r.request)} → `
         + JSON.stringify(r.error ?? r.response))
       return
@@ -290,7 +288,6 @@ export class GeminiLive {
       this.turn = { heard: '', said: '', latencyMs: null, interrupted: false }
       this.toolAtMs = null
       this.firstAudioAtMs = null
-      this.bursts = 0
       // Deliberately NOT setting state to 'listening' here: turnComplete means
       // generation finished, not that playback did. The buffer's drain event is
       // the honest end of speaking.
