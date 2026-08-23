@@ -21,6 +21,7 @@ const wsBase = backend.replace(/^http/, 'ws').replace(/\/$/, '')
 let live: GeminiLive | null = null
 let heapTimer: number | undefined
 const heap: number[] = []
+let lastSummary: string | null = null
 
 function log(line: string) {
   const el = $('log')
@@ -46,13 +47,22 @@ function renderTurn(t: { heard: string; said: string; latencyMs: number | null; 
   refreshSummary()
 }
 
-function refreshSummary() {
-  if (!live) return
-  const s = live.summary()
-  const mem = heap.length
-    ? `${Math.round(Math.min(...heap) / 1e6)}–${Math.round(Math.max(...heap) / 1e6)} MB`
-    : 'n/a'
-  $('summary').textContent = JSON.stringify({ ...s, jsHeap: mem }, null, 2)
+/** Render the metrics panel and return the exact text rendered.
+ *
+ *  Returns the string rather than only writing it to the DOM so the copy button
+ *  can copy CURRENT numbers instead of re-reading whatever the panel happened to
+ *  be showing — which, before this, could be the placeholder. */
+function refreshSummary(): string | null {
+  // `lastSummary` survives Stop, because the numbers are most wanted exactly
+  // after a session ends and `live` is null by then.
+  if (live) {
+    const mem = heap.length
+      ? `${Math.round(Math.min(...heap) / 1e6)}–${Math.round(Math.max(...heap) / 1e6)} MB`
+      : 'n/a'
+    lastSummary = JSON.stringify({ ...live.summary(), jsHeap: mem }, null, 2)
+  }
+  if (lastSummary) $('summary').textContent = lastSummary
+  return lastSummary
 }
 
 async function start() {
@@ -112,9 +122,22 @@ async function stop() {
 $('start').addEventListener('click', start)
 $('stop').addEventListener('click', stop)
 $('interrupt').addEventListener('click', () => live?.interrupt())
-$('copy').addEventListener('click', () => {
-  navigator.clipboard.writeText($('summary').textContent || '')
-  log('summary copied')
+$('copy').addEventListener('click', async () => {
+  const text = refreshSummary()
+  // Nothing to copy is a real outcome, not a silent no-op: the old version
+  // cheerfully copied the literal placeholder "start a session".
+  if (!text) { log('⚠️ nothing to copy yet — run at least one turn first'); return }
+  try {
+    // Requires a secure context. localhost qualifies, a plain-http LAN address
+    // does NOT — and that failure is exactly why the result is now reported.
+    await navigator.clipboard.writeText(text)
+    log(`metrics copied (${text.length} chars)`)
+  } catch (e: any) {
+    // Never claim success on a rejected promise. The metrics are printed to the
+    // log instead so the numbers are still recoverable by selecting text.
+    log(`❌ clipboard blocked (${e?.name || e}) — metrics printed below instead`)
+    log(text)
+  }
 })
 
 log(`backend: ${backend}`)
