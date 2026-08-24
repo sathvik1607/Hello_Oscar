@@ -29,6 +29,34 @@ export function parseIstNaive(s: string | null | undefined): Date | null {
     +y, +mo - 1, +d, +h, +mi, +(se ?? 0)) - IST_OFFSET_MIN * 60_000)
 }
 
+/**
+ * A naive-UTC string → a real Date.
+ *
+ * 🔴 A THIRD CONVENTION, and it is the opposite of parseIstNaive above.
+ * `pa_users.last_seen` is stamped `datetime.now(timezone.utc).replace(tzinfo=None)`
+ * (`ws/websocket_router.py`) — deliberately UTC, deliberately naive. It is the ONLY
+ * timestamp on the wire written that way; messages and notifications go out through
+ * `chat_session_service._iso`, which attaches a real offset.
+ *
+ * Its backend comment says "the client marks server timestamps as UTC" — true of
+ * the Flutter client, and false here: per the ES spec a date-time string with no
+ * offset is parsed as LOCAL time, so `new Date("2026-08-24T15:06:52")` in a
+ * browser on IST reads 3:06 pm when the person was actually last seen at 8:36 pm.
+ * Measured against the live DB: every last-seen on the Chats and My Team screens
+ * was 5h30m early.
+ *
+ * Fixed client-side by appending the Z the string is missing. A backend fix would
+ * change a field the mobile app already reads correctly.
+ */
+export function parseUtcNaive(s: string | null | undefined): Date | null {
+  if (!s) return null
+  // Already carries a zone (…Z, …+05:30) → trust it. Only a bare naive string is
+  // assumed UTC, so this stays correct if the backend ever starts sending an offset.
+  const naive = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?$/.test(s.trim())
+  const d = new Date(naive ? `${s.trim().replace(' ', 'T')}Z` : s)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
 /** A Date → the IST-naive string the backend expects back. Never send an ISO
  *  string with a Z or an offset for these fields; the backend would store the
  *  digits verbatim and the task would be born hours off. */
@@ -131,10 +159,14 @@ export function relative(d: Date | null): string {
 /** Chat/message timestamps. These carry an explicit offset from the server
  *  (chat_session_service._iso), so they can be parsed normally — the IST-naive
  *  rule does NOT apply here, and applying it would shift them by 5½ hours. */
-export function messageTime(s: string | null | undefined): string {
+export function messageTime(s: string | null | undefined,
+                            zone: 'auto' | 'utc' = 'auto'): string {
   if (!s) return ''
-  const d = new Date(s)
-  if (Number.isNaN(d.getTime())) return ''
+  // `zone:'utc'` for last_seen, the one field written naive-UTC. Opt-in rather than
+  // the default, because message timestamps already arrive with a real offset and
+  // forcing UTC on those would break them in the other direction.
+  const d = zone === 'utc' ? parseUtcNaive(s) : new Date(s)
+  if (!d || Number.isNaN(d.getTime())) return ''
   return fmtTime.format(d).toLowerCase()
 }
 
@@ -163,8 +195,9 @@ export function titleCaseName(name: string | null | undefined): string {
 /** "today at 5:40 pm" / "yesterday at 5:40 pm" / "19 Aug at 5:40 pm" — the
  *  last-seen line in a DM header. Same shape as the Flutter version. */
 export function lastSeenLabel(iso: string | null | undefined): string {
-  const d = iso ? new Date(iso) : null
-  if (!d || Number.isNaN(d.getTime())) return 'Offline'
+  // parseUtcNaive, NOT new Date — see its comment. This is the field that was wrong.
+  const d = parseUtcNaive(iso)
+  if (!d) return 'Offline'
   const t = timeLabel(d)
   if (isToday(d)) return `last seen today at ${t}`
   const y = new Date(istNow().getTime() - 86_400_000)
