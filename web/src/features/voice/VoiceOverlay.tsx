@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Mic, Radio, Settings2, X } from 'lucide-react'
-import { SPEAKERS } from '../../lib/speakers'
+import { VOICE_OPTIONS, validVoice } from '../../lib/speakers'
 import { useVoice } from './VoiceProvider'
 import { Button, Portal, cx } from '../../ui'
 import { useTaskActions } from '../tasks/useTaskActions'
@@ -189,12 +189,16 @@ export function VoiceOverlay() {
             <label className="flex items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5"
                    style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border)' }}>
               <span className="text-[13px] font-medium">Oscar's voice</span>
-              <select value={v.speaker} disabled={v.running}
+              {/* 🔴 VOICE_OPTIONS, never SPEAKERS. This offered the bulbul list on a
+                  Gemini build, and toGeminiVoice() maps every unrecognised name to
+                  Puck — so all nine choices did the same thing. Settings already
+                  guarded this; the overlay was missed when the engine changed. */}
+              <select value={validVoice(v.speaker)} disabled={v.running}
                       onChange={e => v.setSpeaker(e.target.value)}
                       className="rounded-lg border px-2 py-1 text-[13px]"
                       style={{ background: 'var(--bg)', borderColor: 'var(--border)',
                                color: 'var(--text)' }}>
-                {SPEAKERS.map(s => <option key={s} value={s}>{s}</option>)}
+                {VOICE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </label>
             {v.running && (

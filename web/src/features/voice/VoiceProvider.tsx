@@ -3,7 +3,7 @@ import {
   useRef, useState,
 } from 'react'
 import type { Phase } from '../../lib/liveVoice'
-import { DEFAULT_SPEAKER } from '../../lib/speakers'
+import { validVoice } from '../../lib/speakers'
 import { isSignedIn } from '../../lib/session'
 import { VOICE_HOTKEY, VOICE_TAP, useDoubleTap, useHotkey } from '../../lib/hotkeys'
 
@@ -89,7 +89,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   const [ambient, setAmbientState] = useState(
     () => localStorage.getItem(LS_AMBIENT) === '1')
   const [speaker, setSpeakerState] = useState(
-    () => localStorage.getItem(LS_SPEAKER) ?? DEFAULT_SPEAKER)
+    () => validVoice(localStorage.getItem(LS_SPEAKER)))
 
   const [st, setSt] = useState<VoiceState>({
     phase: 'idle', level: 0, partial: '', heard: '', reply: '', items: [],

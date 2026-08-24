@@ -18,8 +18,15 @@ export const SPEAKERS = [
   'priya', 'neha', 'kavya', 'shreya',            // female
 ] as const
 
-export const DEFAULT_SPEAKER =
+/** 🔴 Sarvam-only, and NOT the app default. Kept as its own export so the name
+ *  cannot be mistaken for engine-agnostic — see DEFAULT_VOICE below. */
+export const DEFAULT_SARVAM_SPEAKER =
   (import.meta.env.VITE_SARVAM_SPEAKER as string | undefined) ?? 'dev'
+
+/** Kept under the old name because `liveVoice.ts` — the shipping Sarvam engine — imports
+ *  it, and that file is deliberately untouched. It is the correct default THERE; the
+ *  bug was the app as a whole using it regardless of which engine was compiled in. */
+export const DEFAULT_SPEAKER = DEFAULT_SARVAM_SPEAKER
 
 
 /**
@@ -50,6 +57,32 @@ export const VOICE_OPTIONS: readonly string[] =
  *  implementation detail a user cannot act on, and naming it in Settings meant the
  *  copy had to be re-edited every time the engine changed — and was wrong in
  *  between. */
+/**
+ * The starting selection, FOR THE COMPILED ENGINE.
+ *
+ * 🔴 This used to be the Sarvam default unconditionally, so a Gemini build opened
+ * with "dev" selected — a bulbul speaker name Gemini has never heard of. It still
+ * produced audio, because toGeminiVoice() maps anything unrecognised to Puck, which
+ * is exactly what made it hard to notice: the voice worked while the control
+ * reported a voice that was not being used.
+ *
+ * Validated against the live list rather than trusted, so a stale VITE_GEMINI_VOICE
+ * or a value left in localStorage by an earlier build cannot reintroduce it.
+ */
+export const DEFAULT_VOICE: string = (() => {
+  const wanted = VOICE_ENGINE === 'sarvam'
+    ? DEFAULT_SARVAM_SPEAKER
+    : ((import.meta.env.VITE_GEMINI_VOICE as string | undefined) ?? 'Puck')
+  return VOICE_OPTIONS.includes(wanted) ? wanted : VOICE_OPTIONS[0]
+})()
+
+/** Coerces any stored value onto the current engine's list. localStorage survives a
+ *  rebuild, so a name saved while the other engine was compiled in would otherwise
+ *  sit in the picker forever. */
+export function validVoice(v: string | null | undefined): string {
+  return v && VOICE_OPTIONS.includes(v) ? v : DEFAULT_VOICE
+}
+
 export const VOICE_HINT = VOICE_ENGINE === 'sarvam'
   ? 'The first five are male voices, the rest female.'
   : 'Puck and Fenrir are warmer; Kore and Charon are flatter.'
