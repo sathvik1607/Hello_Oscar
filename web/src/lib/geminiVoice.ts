@@ -33,10 +33,18 @@
  *
  * WHAT THE APP LOSES, AND THESE ARE REAL
  * --------------------------------------
- * 🔴 NOTHING IS PERSISTED. The Sarvam path posts to `/chat/stream`, so every spoken
- * turn lands in `pa_chat_messages` and appears in chat history. Gemini Live holds
- * the conversation in its own session and writes nothing. Close the tab and the
- * conversation is gone.
+ * PERSISTENCE. A chat session is opened on start and its id rides on the socket,
+ * so the RELAY writes each completed turn to `pa_chat_messages` — voice history
+ * now appears in the chat list like the typed path. Written server-side because the
+ * relay already sees both transcripts and a client that reports its own
+ * conversation can report anything.
+ *
+ * ⚠️ What is saved is the TRANSCRIPT, not what Gemini understood. On a native-audio
+ * model the transcription is a separate lossy channel — measured, it rendered "who
+ * are my teammates" as "Poor my teammates" while the tool call was perfect. So
+ * history is a faithful record of the transcript and an approximate record of the
+ * conversation. If the session cannot be opened, voice still works and simply
+ * persists nothing.
  *
  * 🔴 `onReplyToken` IS A TRANSCRIPT, NOT THE ANSWER. On the Sarvam path the text
  * IS the reply — it is what gets spoken. Here Gemini speaks from audio directly and
@@ -51,7 +59,7 @@
  */
 
 import { PcmPlayer } from './pcmPlayer'
-import { getToken, getUser, getWsBase } from './session'
+import { getBase, getToken, getUser, getWsBase } from './session'
 import { wakeStrip } from './wakeWord'
 import type { Handlers, Phase } from './liveVoice'
 
@@ -138,6 +146,9 @@ export class GeminiVoice {
   private toolRan = false
   private lastReplyAt = 0
   private speaking = false
+  /** The chat session spoken turns are written into. Null when it could not be
+   *  opened — voice keeps working, it just leaves no history. */
+  private sessionId: number | null = null
 
   constructor(h: Handlers, userId: number = getUser()?.id ?? 0, speaker?: string) {
     this.h = h
@@ -157,6 +168,9 @@ export class GeminiVoice {
     this.h.onPhase('idle')
     try {
       await this.player.start()
+      // Before the socket, because the id has to ride on its query string. A
+      // failure here is non-fatal by design — see openSession.
+      await this.openSession()
       await this.openSocket()
       await this.openMic()
       this.running = true
@@ -170,6 +184,28 @@ export class GeminiVoice {
     }
   }
 
+  /** Open a chat session so the relay has somewhere to write.
+   *
+   *  Deliberately swallows its own failure: losing history is a far smaller
+   *  problem than refusing to let the user speak, so a session that cannot be
+   *  created leaves `sessionId` null and the call proceeds unpersisted.
+   */
+  private async openSession(): Promise<void> {
+    try {
+      const r = await fetch(`${getBase()}/chat/sessions?user_id=${this.userId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
+        },
+        body: JSON.stringify({ user_id: this.userId }),
+      })
+      if (r.ok) this.sessionId = (await r.json()).session_id ?? null
+    } catch {
+      this.sessionId = null
+    }
+  }
+
   private openSocket(): Promise<void> {
     return new Promise((resolve, reject) => {
       // A browser cannot set headers on a WebSocket, so the bearer token rides as
@@ -177,6 +213,7 @@ export class GeminiVoice {
       // can refuse a token that arrives claiming a different user.
       const url = `${voiceWs()}?user_id=${this.userId}`
         + `&t=${encodeURIComponent(getToken() || '')}&voice=${this.voice}`
+        + (this.sessionId ? `&session_id=${this.sessionId}` : '')
       const ws = new WebSocket(url)
       this.ws = ws
       ws.onopen = () => resolve()
