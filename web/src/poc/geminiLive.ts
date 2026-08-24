@@ -148,6 +148,7 @@ export class GeminiLive {
   private toolAtMs: number | null = null
   private firstAudioAtMs: number | null = null
   private speaking = false
+  private dropUntilTurnEnd = false
   /** 🔴 Overlapping speech: a new burst starting while the previous one is still
    *  playing. The ring buffer would mix them into gibberish, so this is the
    *  failure mode that would disqualify non-blocking outright. */
@@ -268,6 +269,7 @@ export class GeminiLive {
       // finishing a sentence the user has already moved past, which is exactly
       // the "it ignored me" complaint.
       this.player.clear()
+      this.dropUntilTurnEnd = false
       this.turn.interrupted = true
       this.stats.interruptions++
       this.h.onLog('⟂ interrupted — barge-in, buffer dropped')
@@ -288,13 +290,14 @@ export class GeminiLive {
     const parts = sc.modelTurn?.parts ?? []
     for (const p of parts) {
       const d = p.inlineData?.data
-      if (d) {
+      if (d && !this.dropUntilTurnEnd) {
         this.stats.chunksIn++
         this.player.push(d)
       }
     }
 
     if (sc.turnComplete) {
+      this.dropUntilTurnEnd = false
       this.stats.turns++
       this.h.onTurn({ ...this.turn })
       if (this.turn.latencyMs != null) this.latencies.push(this.turn.latencyMs)
@@ -411,6 +414,11 @@ export class GeminiLive {
 
   /** Manual interrupt, for comparison against Gemini's own barge-in. */
   interrupt() {
+    // Clearing the buffer alone is not an interrupt: Gemini keeps generating and
+    // the arriving chunks refill it, so playback resumes mid-sentence. Drop
+    // incoming audio for the rest of the turn. Flag first, then clear — a chunk
+    // landing between the two lines would stutter back to life.
+    this.dropUntilTurnEnd = true
     this.player.clear()
     this.h.onState('listening')
   }

@@ -135,9 +135,11 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
         // the Gemini path: `turnComplete` means generation finished, while seconds
         // of audio can still be queued, so the buffer draining is the honest end.
         //
-        // Only from `speaking`, deliberately. Clearing on every `listening` would
-        // wipe the transcript the instant a barge-in cut the reply off — losing
-        // exactly the text the user interrupted to correct.
+        // Only from `speaking`, so the clear never fires on the initial listening
+        // state. An INTERRUPTED reply also lands here — the provider cannot tell a
+        // finished reply from an interrupted one, since both are speaking →
+        // listening — and that is acceptable: interrupting means moving on, so a
+        // cleared screen is what the user is asking for either way.
         const turnEnded = p === 'listening' && s.phase === 'speaking'
         return {
           ...s, phase: p, running: true,

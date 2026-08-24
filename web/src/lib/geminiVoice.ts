@@ -146,6 +146,17 @@ export class GeminiVoice {
   private toolRan = false
   private lastReplyAt = 0
   private speaking = false
+  /** 🔴 Set when the user interrupts by tap/Space. Clearing the buffer is NOT
+   *  enough: Gemini is still generating and keeps streaming the rest of the reply,
+   *  so the freed buffer refills and playback RESUMES mid-sentence — "it stops,
+   *  then carries on from where it stopped". Incoming audio is dropped for the
+   *  remainder of the interrupted turn, so a tap ends the reply rather than
+   *  pausing it.
+   *
+   *  A local drop rather than a protocol signal because the manual activity
+   *  frames (`activityStart`/`activityEnd`) are only available with automatic VAD
+   *  DISABLED, and Gemini's own VAD is the thing making barge-in work. */
+  private dropUntilTurnEnd = false
   /** The chat session spoken turns are written into. Null when it could not be
    *  opened — voice keeps working, it just leaves no history. */
   private sessionId: number | null = null
@@ -257,6 +268,9 @@ export class GeminiVoice {
       // is dropped rather than played out — otherwise the speaker keeps finishing a
       // sentence the user has already moved past.
       this.player.clear()
+      // A server-side interruption already ends the turn upstream, so nothing more
+      // arrives for it — the drop flag is cleared rather than set.
+      this.dropUntilTurnEnd = false
       this.h.onPhase('listening')
       this.awaitingAudio = false
       this.speechEndAt = null
@@ -274,7 +288,10 @@ export class GeminiVoice {
     }
 
     for (const p of sc.modelTurn?.parts ?? []) {
-      if (p.inlineData?.data) this.player.push(p.inlineData.data)
+      // Still accumulated into `said` above, deliberately: the transcript of what
+      // Gemini was saying stays complete and gets persisted, even though the user
+      // chose not to hear the rest of it.
+      if (p.inlineData?.data && !this.dropUntilTurnEnd) this.player.push(p.inlineData.data)
     }
 
     if (sc.turnComplete) this.endTurn()
@@ -298,6 +315,7 @@ export class GeminiVoice {
       // background chatter from summoning the UI.
     }
     this.lastReplyAt = performance.now()
+    this.dropUntilTurnEnd = false      // next turn starts audible
     this.heard = ''
     this.said = ''
     this.turnNo++
@@ -396,7 +414,11 @@ export class GeminiVoice {
   /** Stop speaking now. Gemini also interrupts itself on real barge-in; this is the
    *  tap-to-stop path the overlay offers. */
   interrupt() {
+    // Order matters: raise the flag BEFORE clearing, or a chunk arriving between
+    // the two lines lands in the buffer and playback stutters back to life.
+    this.dropUntilTurnEnd = true
     this.player.clear()
+    this.speaking = false
     if (this.running) this.h.onPhase('listening')
   }
 
