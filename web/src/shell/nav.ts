@@ -29,7 +29,7 @@ export const NAV: NavItem[] = [
   { id: 'notes',         label: 'Notes',    icon: NotebookPen },
   { id: 'personalize',   label: 'Personalize', icon: Sparkles },
   { id: 'messages',      label: 'Messages', icon: MessageSquare, needsTeam: true },
-  { id: 'team',          label: 'Team',     icon: Users, needsTeam: true },
+  { id: 'team',          label: 'My Team',  icon: Users, needsTeam: true },
   { id: 'notifications', label: 'Activity', icon: Bell },
   { id: 'settings',      label: 'Settings', icon: Cog },
 ]
@@ -41,7 +41,7 @@ export const TITLES: Record<SectionId, { title: string; subtitle: string }> = {
   chat:          { title: 'Oscar',    subtitle: 'Ask, and it acts' },
   notes:         { title: 'Notes',    subtitle: 'Context Oscar remembers' },
   personalize:   { title: 'Personalize', subtitle: 'Teach Oscar how you work' },
-  team:          { title: 'Team',     subtitle: 'Who is on what' },
+  team:          { title: 'My Team',  subtitle: 'Who is on what' },
   messages:      { title: 'Messages', subtitle: 'Team chat and direct messages' },
   notifications: { title: 'Activity', subtitle: 'Everything Oscar has told you' },
   settings:      { title: 'Settings', subtitle: 'Account, voice and connection' },
