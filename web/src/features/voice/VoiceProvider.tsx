@@ -124,14 +124,14 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     // Imported on demand: the engine is ~1,000 lines of audio code and most page
     // loads never open a microphone. Ambient mode pays this on load, which is the
     // user's own choice rather than everyone's default.
-    // 🔴 ENGINE CHOICE. Gemini by default; `VITE_VOICE_ENGINE=sarvam` restores the
-    // previous path. Both implement the same `Handlers` contract, so nothing below
+    // 🔴 ENGINE CHOICE. Sarvam by default — the path that has been in production
+    // for months. `VITE_VOICE_ENGINE=gemini` opts into Gemini Live. Both implement the same `Handlers` contract, so nothing below
     // this line differs between them — which is also why switching back is an env
     // var and a reload rather than a revert.
-    const useSarvam = (import.meta.env.VITE_VOICE_ENGINE as string) === 'sarvam'
-    const Engine = useSarvam
-      ? (await import('../../lib/liveVoice')).LiveVoice
-      : (await import('../../lib/geminiVoice')).GeminiVoice
+    const useGemini = (import.meta.env.VITE_VOICE_ENGINE as string) === 'gemini'
+    const Engine = useGemini
+      ? (await import('../../lib/geminiVoice')).GeminiVoice
+      : (await import('../../lib/liveVoice')).LiveVoice
     const lv = new Engine({
       onPhase: p => setSt(s => {
         // 🔴 CLEAR THE SCREEN AT THE END OF A COMPLETED TURN. Returning to
