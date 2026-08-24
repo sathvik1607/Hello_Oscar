@@ -48,6 +48,9 @@ export type VoiceState = {
   error: string | null
   running: boolean
   speaking: boolean
+  /** A tool is running this turn — lets the overlay say what it is doing instead
+   *  of guessing. */
+  working: boolean
   /** Set when the browser refused to play audio without a user gesture. Autoplay
    *  policy blocks sound until the page has been interacted with, so an ambient
    *  wake on a fresh load can be heard by us and not heard BY the user. */
@@ -87,6 +90,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   const [st, setSt] = useState<VoiceState>({
     phase: 'idle', level: 0, partial: '', heard: '', reply: '',
     error: null, running: false, speaking: false, needsGesture: false,
+    working: false,
   })
 
   /** Either engine. Structurally typed rather than tied to one class, because the
@@ -149,6 +153,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
           reply: turnEnded ? '' : s.reply,
         }
       }),
+      onTool: running => setSt(s => ({ ...s, working: running })),
       onLevel: level => setSt(s => (
         // Only while listening: the orb is the only consumer, and updating state
         // ~10×/second through a whole reply re-renders the app for nothing.

@@ -230,6 +230,14 @@ export type Handlers = {
   onReplyToken: (full: string) => void
   onTimings: (t: Timings) => void
   onError: (msg: string) => void
+  /** A tool is running / has finished. OPTIONAL, so the Sarvam engine — which does
+   *  not report this — satisfies the contract unchanged. It exists because the
+   *  overlay used to claim "Checking your tasks and calendar" on EVERY thinking
+   *  phase, including turns that called no tool at all: "what can you do" showed
+   *  it while the anti-fabrication guard was simultaneously flagging that no tool
+   *  had run. A status line that describes work nobody did teaches the user to
+   *  ignore status lines. */
+  onTool?: (running: boolean) => void
 }
 
 /** Downsample browser audio (usually 48 kHz float) to 16 kHz PCM16.

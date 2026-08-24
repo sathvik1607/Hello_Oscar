@@ -27,7 +27,12 @@ import { VOICE_TAP_LABEL } from '../../lib/hotkeys'
 const PHASE_COPY: Record<Phase, { title: string; hint: string }> = {
   idle:      { title: 'Tap to start', hint: 'Oscar will listen while this is open' },
   listening: { title: 'Listening',    hint: `Say "${wakeWord()}…" then what you need` },
-  thinking:  { title: 'Working on it', hint: 'Checking your tasks and calendar' },
+  // The hint here is deliberately vague: it is shown the moment the user falls
+  // silent, BEFORE anything is known about the turn. Claiming "checking your tasks
+  // and calendar" on every one of those was simply false — it appeared on "what can
+  // you do", a turn that called no tool at all. Overridden below when a tool really
+  // is running.
+  thinking:  { title: 'Working on it', hint: 'One moment' },
   speaking:  { title: 'Speaking',     hint: 'Tap to interrupt' },
 }
 
@@ -67,7 +72,11 @@ export function VoiceOverlay() {
     return () => window.removeEventListener('keydown', onKey)
   }, [v, onOrbTap])
 
-  const copy = PHASE_COPY[v.phase]
+  const base = PHASE_COPY[v.phase]
+  // Only claim to be reading their data when a tool is genuinely running.
+  const copy = v.phase === 'thinking' && v.working
+    ? { ...base, hint: 'Checking your workspace' }
+    : base
   // Space is the in-overlay control: no modifier needed once you are already here,
   // and it is the key your thumb is on. The global Alt+V still works too.
   // Capped, so a loud room cannot inflate the orb off the screen.

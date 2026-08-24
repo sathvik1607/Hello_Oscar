@@ -254,6 +254,7 @@ export class GeminiVoice {
       // is flagged: its first-word time is not comparable to a plain reply and must
       // not be averaged with one.
       this.toolRan = true
+      this.h.onTool?.(true)
       this.h.onPhase('thinking')
       return
     }
@@ -321,6 +322,7 @@ export class GeminiVoice {
       // background chatter from summoning the UI.
     }
     this.lastReplyAt = performance.now()
+    this.h.onTool?.(false)
     this.dropUntilTurnEnd = false      // next turn starts audible
     this.heard = ''
     this.said = ''
