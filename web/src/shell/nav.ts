@@ -1,6 +1,6 @@
 import {
   Bell, CalendarDays, CheckSquare, Cog, Home, MessageSquare, MessagesSquare,
-  NotebookPen, Sparkles, Users,
+  NotebookPen, Users,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
@@ -51,7 +51,6 @@ export const NAV: NavItem[] = [
   { id: 'tasks',         label: 'Tasks',    icon: CheckSquare,    primary: true },
   { id: 'notes',         label: 'Notes',    icon: NotebookPen },
   { id: 'notifications', label: 'Activity', icon: Bell },
-  { id: 'personalize',   label: 'Personalize', icon: Sparkles },
   { id: 'settings',      label: 'Settings', icon: Cog },
 ]
 

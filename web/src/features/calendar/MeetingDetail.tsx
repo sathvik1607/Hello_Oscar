@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Clock, MapPin, Trash2, Users, X } from 'lucide-react'
+import { Clock, MapPin, Pencil, Trash2, Users, X } from 'lucide-react'
 import { ApiError, tasks as itemsApi } from '../../lib/api'
 import { dayLabel, istNow, parseIstNaive, timeLabel } from '../../lib/format'
 import type { Meeting } from '../../lib/types'
+import { EditMeetingSheet } from './EditMeetingSheet'
 import {
   CommentComposer, CommentList, useCommentThread,
 } from '../tasks/CommentThread'
@@ -28,6 +29,7 @@ export function MeetingDetail({ meeting, onClose, onChanged }: {
   onChanged: () => void
 }) {
   const thread = useCommentThread(meeting.id, onChanged)
+  const [editing, setEditing] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [confirm, setConfirm] = useState(false)
 
@@ -133,7 +135,12 @@ export function MeetingDetail({ meeting, onClose, onChanged }: {
 
           {/* Cancelling something already over would only confuse the record. */}
           {!past && meeting.status !== 'cancelled' && (
-            <div className="mt-4 flex items-center gap-2">
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              {!confirm && (
+                <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>
+                  <Pencil className="size-3.5" /> Edit
+                </Button>
+              )}
               {confirm ? (
                 <>
                   <Button size="sm" variant="danger" onClick={() => void cancel()}>
@@ -149,6 +156,19 @@ export function MeetingDetail({ meeting, onClose, onChanged }: {
                 </Button>
               )}
             </div>
+          )}
+
+          {editing && (
+            <EditMeetingSheet
+              meeting={meeting}
+              onClose={() => setEditing(false)}
+              onSaved={() => {
+                setEditing(false)
+                // Reload rather than patching locally: changing scheduled_at moves
+                // the meeting to a different day on the calendar behind this sheet.
+                onChanged()
+              }}
+            />
           )}
 
           {err && <p className="mt-3 text-[13px]" style={{ color: '#DC2626' }}>{err}</p>}
