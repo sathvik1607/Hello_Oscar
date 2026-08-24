@@ -7,8 +7,7 @@ import type { Task } from '../../lib/types'
 import { CommentComposer, CommentList, useCommentThread } from './CommentThread'
 import { NewTaskSheet } from './NewTaskSheet'
 import {
-  Badge, Button, IconButton, Portal, STATUS_LABEL, cx,
-} from '../../ui'
+  Badge, Button, IconButton, Portal, STATUS_LABEL, cx, Linkify} from '../../ui'
 
 /**
  * One task, opened: description, details, actions, then the comment thread.
@@ -149,7 +148,7 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart }: {
           </div>
           {task.description?.trim() ? (
             <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-              {task.description}
+              <Linkify text={task.description} />
             </p>
           ) : (
             <p className="text-sm italic" style={{ color: 'var(--text-subtle)' }}>

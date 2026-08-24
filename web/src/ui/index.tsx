@@ -303,3 +303,4 @@ export function Portal({ children }: { children: ReactNode }) {
   if (!host) return null
   return createPortal(children, host)
 }
+export { Linkify } from './Linkify'

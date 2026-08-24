@@ -13,8 +13,7 @@ import type { ChatText, TeamMember } from '../../lib/types'
 import { activeQuery, applyPick, matches, resolve } from './mentions'
 import { Avatar } from '../../shell/AppShell'
 import {
-  Button, Card, EmptyState, ErrorState, IconButton, Skeleton, cx, inputCls, inputStyle,
-} from '../../ui'
+  Button, Card, EmptyState, ErrorState, IconButton, Skeleton, cx, inputCls, inputStyle, Linkify} from '../../ui'
 
 /**
  * Team group chat and 1-on-1 DMs.
@@ -610,7 +609,7 @@ function Bubble({ row, mine, showAuthor, read, onReply }: {
               <span className="block truncate">{row.reply_to.text}</span>
             </div>
           )}
-          <span className="whitespace-pre-wrap break-words">{row.text}</span>
+          <span className="whitespace-pre-wrap break-words"><Linkify text={row.text} /></span>
         </div>
         <div className={cx('mt-0.5 flex items-center gap-1 px-1 text-[10.5px] tabular-nums',
                            mine ? 'justify-end' : 'justify-start')}

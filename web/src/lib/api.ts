@@ -255,8 +255,21 @@ export const meetings = {
 
   create: (body: {
     title: string; scheduled_at: string; ends_at?: string | null
-    location?: string; description?: string; assigned_to_user_id?: number | null
-  }) => request<Meeting>('/meetings', { method: 'POST', body: { ...body, user_id: requireUserId() } }),
+    location?: string; assigned_to_user_id?: number | null
+    /** Notes. The backend was silently DROPPING this until it was found: the column
+     *  pa_items.description always existed, the request model just had no field for
+     *  it, and Pydantic ignores unknown keys. Measured — text in, None out. */
+    description?: string
+    /** Every teammate invitee. The backend fans the meeting out so each of them
+     *  sees it on their own schedule; `assigned_to_user_id` is the primary and is
+     *  derived from the first of these. */
+    attendee_user_ids?: number[]
+    /** Guest names that are NOT user accounts — stored as a string, notified never. */
+    attendees?: string[]
+    /** 🔴 The response is `{ok, meeting}`, NOT a bare Meeting. It was typed as the
+     *  latter, which compiled only because nothing read the return value. */
+  }) => request<{ ok: boolean; meeting: Meeting }>(
+    '/meetings', { method: 'POST', body: { ...body, user_id: requireUserId() } }),
 }
 
 // ── chat ─────────────────────────────────────────────────────────────────────

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
-import { ApiError, tasks as tasksApi } from '../../lib/api'
+import { ApiError, tasks as tasksApi, team as teamApi } from '../../lib/api'
+import { useApi } from '../../lib/useApi'
+import { getUser } from '../../lib/session'
 import { istDateKey, istNow } from '../../lib/format'
 import { Button, Field, IconButton, Portal, cx, inputCls, inputStyle } from '../../ui'
 import type { Task } from '../../lib/types'
@@ -35,6 +37,31 @@ export function NewTaskSheet({ onClose, onCreated, task }: {
   // the time the user sees by hours.
   const seededDate = task?.due_at ? task.due_at.slice(0, 10) : null
   const seededTime = task?.due_at ? task.due_at.slice(11, 16) : null
+  const me = getUser()
+  /**
+   * Who the task is FOR. The form had no such field, so every task created from
+   * the web was silently self-assigned — while `POST /items` has always accepted
+   * `assigned_to_user_ids`. A lead could not hand work to anyone without asking
+   * Oscar to do it in words.
+   *
+   * 🔴 PICKED FROM THE TEAM, never typed. Task assignee resolution is team-scoped,
+   * but the agent's MEETING invitee resolution is not, and this project already has
+   * a wrong-person incident from loose name matching. Sending ids from a list of
+   * actual members removes the question entirely.
+   *
+   * Multi-select because `pa_item_assignees` exists precisely for shared work —
+   * each assignee carries their own status, and `is_mine` is true for any of them.
+   * Empty means self-assigned, which is what happens today.
+   */
+  const members = useApi(s => (me?.team_id ? teamApi.members(me.team_id, s) : Promise.resolve([])),
+                         [me?.team_id])
+  const [assignees, setAssignees] = useState<number[]>(() => {
+    // Seeded from the roster when editing, so saving a retitle cannot drop who is
+    // on it. Falls back to the primary for a task with no roster rows.
+    const roster = (task?.assignees ?? []).map(a => a.user_id).filter(Boolean)
+    if (roster.length) return roster
+    return task?.assigned_to_user_id ? [task.assigned_to_user_id] : []
+  })
   const [title, setTitle] = useState(task?.title ?? '')
   const [date, setDate] = useState(seededDate ?? istDateKey(istNow()))
   const [time, setTime] = useState(seededTime ?? defaultTime())
@@ -69,6 +96,11 @@ export function NewTaskSheet({ onClose, onCreated, task }: {
         // leave the old text in place.
         await tasksApi.update(task.id, {
           title: t, due_at, priority, description: description.trim(),
+          // 🔴 Singular, not the list. PATCH /items {assigned_to_user_id} is the
+          // path that reconciles pa_item_assignees through set_assignees — sending
+          // the plural here would move the legacy column and leave the roster
+          // stale, which is the documented "reassignment did nothing" bug.
+          ...(assignees.length === 1 ? { assigned_to_user_id: assignees[0] } : {}),
         })
       } else {
         await tasksApi.create({
@@ -76,6 +108,9 @@ export function NewTaskSheet({ onClose, onCreated, task }: {
           ...(description.trim() ? { description: description.trim() } : {}),
           due_at,
           priority,
+          // Omitted when empty so the backend's own self-assign default applies,
+          // rather than this client deciding what "nobody" means.
+          ...(assignees.length ? { assigned_to_user_ids: assignees } : {}),
         })
       }
       onCreated()
@@ -147,6 +182,36 @@ export function NewTaskSheet({ onClose, onCreated, task }: {
               for when a title alone loses something — an address, a spec, what
               "follow up" actually meant. Same wording and shape as the Flutter
               sheet, so the two clients do not name one field two ways. */}
+          <Field label="Assign to" hint="Leave empty to keep it yourself">
+            <div className="flex flex-wrap gap-1.5">
+              {(members.data ?? [])
+                .filter(mm => mm.is_active)
+                .map(mm => {
+                  const on = assignees.includes(mm.user_id)
+                  return (
+                    <button key={mm.user_id} type="button"
+                            onClick={() => setAssignees(v => on
+                              ? v.filter(x => x !== mm.user_id)
+                              : [...v, mm.user_id])}
+                            className="rounded-full border px-3 py-1.5 text-[12.5px]
+                                       transition hover:brightness-95"
+                            style={on
+                              ? { background: 'var(--accent)', color: '#fff',
+                                  borderColor: 'var(--accent)' }
+                              : { background: 'var(--bg)', borderColor: 'var(--border)',
+                                  color: 'var(--text-muted)' }}>
+                      {on && '✓ '}{mm.user_id === me?.id ? 'Me' : mm.name}
+                    </button>
+                  )
+                })}
+              {(members.data ?? []).length === 0 && (
+                <span className="text-[12.5px]" style={{ color: 'var(--text-subtle)' }}>
+                  No team — this task will be yours.
+                </span>
+              )}
+            </div>
+          </Field>
+
           <Field label="Description">
             <textarea value={description} onChange={e => setDescription(e.target.value)}
                       rows={3} placeholder="Add details (optional)"

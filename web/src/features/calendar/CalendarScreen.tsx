@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import {
-  CalendarDays, ChevronLeft, ChevronRight, MapPin, Users,
+  CalendarDays, ChevronLeft, ChevronRight, MapPin, Plus, Users,
 } from 'lucide-react'
 import { meetings as meetingsApi, tasks as tasksApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
@@ -11,6 +11,7 @@ import {
 import type { Meeting, Task } from '../../lib/types'
 import { TaskDetail } from '../tasks/TaskDetail'
 import { MeetingDetail } from './MeetingDetail'
+import { EditMeetingSheet } from './EditMeetingSheet'
 import {
   Badge, Button, Card, EmptyState, ErrorState, Skeleton, cx,
 } from '../../ui'
@@ -45,6 +46,7 @@ export function CalendarScreen() {
   // that something existed and then refused to open it.
   const [openTask, setOpenTask] = useState<Task | null>(null)
   const [openMeeting, setOpenMeeting] = useState<Meeting | null>(null)
+  const [creating, setCreating] = useState(false)
 
   const m = useApi(s => meetingsApi.all(s), [], 'meetings:all')
   const t = useApi(s => tasksApi.mine(s), [], 'tasks:mine')
@@ -113,7 +115,16 @@ export function CalendarScreen() {
     <div className="space-y-5">
       {/* ── month grid ───────────────────────────────────────────────── */}
       <Card className="p-3 sm:p-4">
-        <div className="mb-3 flex items-center justify-between gap-2">
+        {/* Month nav on the left, New meeting on the right.
+          *
+          * 🔴 NOT a floating button in this corner. Top-right is where the
+          * next-month chevron already is, so a fixed FAB there covers it on a narrow
+          * screen — and the bottom-right corner is taken twice over: the tab bar is
+          * fixed at the bottom below `lg`, and AppShell's floating Oscar button sits
+          * at bottom-[74px] right-4 below `sm`. In the header row it can collide with
+          * nothing, and it scrolls away with the grid it belongs to rather than
+          * hovering over the agenda. */}
+        <div className="mb-3 flex items-center gap-1">
           <button onClick={() => step(-1)} aria-label="Previous month"
                   className="grid size-9 place-items-center rounded-lg"
                   style={{ color: 'var(--text-muted)' }}>
@@ -125,6 +136,11 @@ export function CalendarScreen() {
                   style={{ color: 'var(--text-muted)' }}>
             <ChevronRight className="size-4" />
           </button>
+          <div className="flex-1" />
+          {/* Opens on the day currently SELECTED, not today — see defaultDate. */}
+          <Button size="sm" variant="primary" onClick={() => setCreating(true)}>
+            <Plus className="size-3.5" /> New meeting
+          </Button>
         </div>
 
         <div className="grid grid-cols-7 gap-px">
@@ -223,6 +239,14 @@ export function CalendarScreen() {
       {openMeeting && (
         <MeetingDetail meeting={openMeeting} onClose={() => setOpenMeeting(null)}
                        onChanged={() => { m.reload(); t.reload() }} />
+      )}
+
+      {creating && (
+        <EditMeetingSheet
+          defaultDate={selectedKey}
+          onClose={() => setCreating(false)}
+          onSaved={() => { setCreating(false); m.reload(); t.reload() }}
+        />
       )}
     </div>
   )

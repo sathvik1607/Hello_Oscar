@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { CalendarClock, CheckCircle2, Clock, Sparkles, Sun } from 'lucide-react'
+import { CalendarClock, CheckCircle2, Clock, Plus, Sun } from 'lucide-react'
 import { meetings as meetingsApi, tasks as tasksApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
@@ -12,8 +12,8 @@ import { completedToday, todayTimeline } from '../tasks/buckets'
 import { TaskCard } from '../tasks/TaskCard'
 import { useTaskActions } from '../tasks/useTaskActions'
 import { TaskDetail } from '../tasks/TaskDetail'
+import { NewTaskSheet } from '../tasks/NewTaskSheet'
 import { MeetingDetail } from '../calendar/MeetingDetail'
-import { useVoice } from '../voice/VoiceProvider'
 import {
   Button, Card, EmptyState, ErrorState, SectionHeading, Skeleton, cx,
 } from '../../ui'
@@ -37,7 +37,11 @@ export function TodayScreen() {
   const user = getUser()
   const [openTask, setOpenTask] = useState<Task | null>(null)
   const [openMeeting, setOpenMeeting] = useState<Meeting | null>(null)
-  const { openVoice } = useVoice()
+  /* Creating a task is the action this screen is missing, and it was the one thing
+     the primary button did NOT do — "Ask Oscar" opened a voice call, which is a
+     slower and less certain way to add a line to a list you are already looking at.
+     Voice is still one keystroke away (Shift Shift, from anywhere). */
+  const [creating, setCreating] = useState(false)
 
   const t = useApi(s => tasksApi.mine(s), [], 'tasks:mine')
   const m = useApi(s => meetingsApi.all(s), [], 'meetings:all')
@@ -100,8 +104,8 @@ export function TodayScreen() {
               </p>
             </div>
             <div className="hidden shrink-0 sm:block">
-              <Button variant="primary" onClick={openVoice}>
-                <Sparkles className="size-4" /> Ask Oscar
+              <Button variant="primary" onClick={() => setCreating(true)}>
+                <Plus className="size-4" /> New task
               </Button>
             </div>
           </div>
@@ -153,9 +157,9 @@ export function TodayScreen() {
               title={done.length > 0 ? "That's everything for today" : 'Nothing scheduled today'}
               body={done.length > 0
                 ? `You finished ${done.length} ${done.length === 1 ? 'task' : 'tasks'}. Nothing else is due.`
-                : 'Ask Oscar to remind you about something, or plan your day from your notes.'}
-              action={<Button variant="primary" onClick={openVoice}>
-                <Sparkles className="size-4" /> Ask Oscar
+                : 'Add something you need to do today, or plan your day from your notes.'}
+              action={<Button variant="primary" onClick={() => setCreating(true)}>
+                <Plus className="size-4" /> New task
               </Button>}
             />
           </Card>
@@ -190,6 +194,15 @@ export function TodayScreen() {
           </div>
         </section>
       )}
+
+      {creating && (
+
+        <NewTaskSheet onClose={() => setCreating(false)}
+
+                      onCreated={() => { setCreating(false); t.reload() }} />
+
+      )}
+
 
       {openTask && (
         <TaskDetail

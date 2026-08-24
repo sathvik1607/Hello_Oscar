@@ -7,7 +7,7 @@ import { EditMeetingSheet } from './EditMeetingSheet'
 import {
   CommentComposer, CommentList, useCommentThread,
 } from '../tasks/CommentThread'
-import { Badge, Button, IconButton, Portal, STATUS_LABEL, cx } from '../../ui'
+import { Badge, Button, IconButton, Portal, STATUS_LABEL, cx, Linkify} from '../../ui'
 
 /**
  * One meeting, opened.
@@ -97,7 +97,7 @@ export function MeetingDetail({ meeting, onClose, onChanged }: {
           {meeting.location && (
             <div className="mb-3 flex items-center gap-2 text-sm">
               <MapPin className="size-3.5 shrink-0" style={{ color: 'var(--text-subtle)' }} />
-              {meeting.location}
+              <Linkify text={meeting.location} />
             </div>
           )}
 
@@ -107,7 +107,7 @@ export function MeetingDetail({ meeting, onClose, onChanged }: {
           </div>
           {meeting.description?.trim() ? (
             <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-              {meeting.description}
+              <Linkify text={meeting.description} />
             </p>
           ) : (
             <p className="text-sm italic" style={{ color: 'var(--text-subtle)' }}>

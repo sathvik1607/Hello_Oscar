@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ArrowDown, Loader2, MessagesSquare, Mic, Plus, Send, Sparkles, Trash2,
+  ArrowDown, Loader2, MessagesSquare, Plus, Send, Sparkles, Trash2,
 } from 'lucide-react'
 import { ApiError, assistant, chat as chatApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { subscribe, watchConnection, type ConnState } from '../../lib/appSocket'
 import { messageTime } from '../../lib/format'
-import { useVoice } from '../voice/VoiceProvider'
 import { InlineCards, OscarPanel } from './OscarPanel'
 import { matchReplyTasks } from './replyTasks'
 import { useSpokenTasks } from './useSpokenTasks'
@@ -14,8 +13,7 @@ import { TaskDetail } from '../tasks/TaskDetail'
 import { useTaskActions } from '../tasks/useTaskActions'
 import type { Task } from '../../lib/types'
 import {
-  Button, Card, EmptyState, IconButton, Skeleton, cx, inputCls, inputStyle,
-} from '../../ui'
+  Button, Card, EmptyState, IconButton, Skeleton, cx, inputCls, inputStyle, Linkify} from '../../ui'
 
 /**
  * Talking to Oscar.
@@ -78,7 +76,6 @@ export function ChatScreen() {
     typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches)
 
   const scroller = useRef<HTMLDivElement>(null)
-  const { openVoice } = useVoice()
 
   const sessions = useApi(s => chatApi.sessions(s))
   // Pulled out because it is the only stable member of the hook result —
@@ -319,7 +316,6 @@ export function ChatScreen() {
           {list.length > 0 && <span className="tabular-nums opacity-60">{list.length}</span>}
         </Button>
         <div className="flex-1" />
-        <Button size="sm" onClick={openVoice}><Mic className="size-3.5" /> Voice</Button>
       </div>
 
       {showSessions && (
@@ -487,7 +483,7 @@ function Bubble({ turn, tasks, onOpen, onToggle, busyId, wide }: {
         >
           {/* Whitespace preserved: Oscar's answers contain deliberate line breaks
               and collapsing them turns a list into a run-on sentence. */}
-          <span className="whitespace-pre-wrap break-words">{turn.text}</span>
+          <span className="whitespace-pre-wrap break-words"><Linkify text={turn.text} /></span>
 
           {/* A caret while streaming, so an in-progress reply is visibly in progress
               rather than looking finished-but-short. */}

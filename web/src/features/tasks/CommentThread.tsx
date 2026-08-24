@@ -9,8 +9,7 @@ import type { CommentAttachment, TaskComment } from '../../lib/types'
 import { Avatar } from '../../shell/AppShell'
 import { ACCEPTED, AttachmentChip, MAX_BYTES, PendingChip } from './AttachmentChip'
 import {
-  Button, EmptyState, ErrorState, Skeleton, cx, inputCls, inputStyle,
-} from '../../ui'
+  Button, EmptyState, ErrorState, Skeleton, cx, inputCls, inputStyle, Linkify} from '../../ui'
 
 /**
  * The comment thread and its composer, for ONE item.
@@ -311,7 +310,7 @@ function Comment({ comment, mine }: { comment: TaskComment; mine: boolean }) {
                style={mine
                  ? { background: 'var(--accent)', color: '#fff' }
                  : { background: 'var(--bg-sunken)', color: 'var(--text)' }}>
-            <span className="whitespace-pre-wrap break-words">{comment.body}</span>
+            <span className="whitespace-pre-wrap break-words"><Linkify text={comment.body} /></span>
           </div>
         )}
       </div>

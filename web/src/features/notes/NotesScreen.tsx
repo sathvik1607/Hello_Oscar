@@ -6,8 +6,7 @@ import { messageTime } from '../../lib/format'
 import type { Note } from '../../lib/types'
 import {
   Button, Card, Confirmation, EmptyState, ErrorState, IconButton, Portal, Skeleton,
-  cx, inputCls, inputStyle,
-} from '../../ui'
+  cx, inputCls, inputStyle, Linkify} from '../../ui'
 
 /**
  * Notes — the long-term context Oscar reads.
@@ -84,7 +83,7 @@ export function NotesScreen() {
               <div className="mb-1 text-[13px] font-semibold">{note.title}</div>
             )}
             <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm leading-relaxed">
-              {note.content}
+              <Linkify text={note.content} />
             </p>
             <div className="mt-3 flex items-center justify-between gap-2">
               <span className="text-[11px]" style={{ color: 'var(--text-subtle)' }}>
