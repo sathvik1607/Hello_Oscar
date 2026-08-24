@@ -284,6 +284,8 @@ export class GeminiLive {
       this.turn.heard += sc.inputTranscription.text
     }
     if (sc.outputTranscription?.text) {
+      // Kept for the record even when interrupted — the POC displays the turn
+      // afterwards, and a truncated transcript would misreport what was said.
       this.turn.said += sc.outputTranscription.text
     }
 

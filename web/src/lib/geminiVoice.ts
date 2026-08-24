@@ -283,8 +283,14 @@ export class GeminiVoice {
       this.h.onPartial(this.heard.trim())
     }
     if (sc.outputTranscription?.text) {
+      // Accumulated either way, so history keeps the whole reply. But NOT emitted
+      // to the UI once interrupted: Gemini goes on transcribing the sentence it is
+      // no longer allowed to speak, and pushing that to the screen made the
+      // interrupted reply keep growing there after the screen had been cleared —
+      // "the previous message is still showing". Silencing the audio without
+      // silencing the caption is only half an interrupt.
       this.said += sc.outputTranscription.text
-      this.h.onReplyToken(this.said.trim())
+      if (!this.dropUntilTurnEnd) this.h.onReplyToken(this.said.trim())
     }
 
     for (const p of sc.modelTurn?.parts ?? []) {
@@ -419,6 +425,12 @@ export class GeminiVoice {
     this.dropUntilTurnEnd = true
     this.player.clear()
     this.speaking = false
+    // Wipe the caption explicitly rather than relying on the phase change. The
+    // provider clears on speaking → listening, but a transcript chunk arriving a
+    // moment later would repopulate it — this makes the screen state match the
+    // audio state at the instant of the interrupt.
+    this.h.onReplyToken('')
+    this.h.onPartial('')
     if (this.running) this.h.onPhase('listening')
   }
 
