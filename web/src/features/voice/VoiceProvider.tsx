@@ -45,6 +45,10 @@ export type VoiceState = {
   partial: string
   heard: string
   reply: string
+  /** Task/meeting ids Oscar's last answer referred to — sent by the relay, never
+   *  derived from the spoken transcript (Gemini paraphrases it). Sarvam sets this
+   *  never, so it stays empty on that engine. */
+  items: { id: number; type: string }[]
   error: string | null
   running: boolean
   speaking: boolean
@@ -88,7 +92,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     () => localStorage.getItem(LS_SPEAKER) ?? DEFAULT_SPEAKER)
 
   const [st, setSt] = useState<VoiceState>({
-    phase: 'idle', level: 0, partial: '', heard: '', reply: '',
+    phase: 'idle', level: 0, partial: '', heard: '', reply: '', items: [],
     error: null, running: false, speaking: false, needsGesture: false,
     working: false,
   })
@@ -168,6 +172,10 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
         if (!overlayRef.current) setOverlayOpen(true)
       },
       onReplyToken: reply => setSt(s => ({ ...s, reply })),
+      // Kept SEPARATE from `reply`, and deliberately not cleared with it: the caption
+      // is wiped at the start of every turn, but what the last answer was ABOUT
+      // should stay on screen until something replaces it.
+      onItems: items => setSt(s => ({ ...s, items })),
       onTimings: () => { /* instrumentation; see VoiceOverlay */ },
       onError: error => setSt(s => ({
         ...s, error,

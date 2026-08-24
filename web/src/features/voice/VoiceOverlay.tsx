@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Mic, Radio, Settings2, X } from 'lucide-react'
 import { SPEAKERS } from '../../lib/speakers'
 import { useVoice } from './VoiceProvider'
 import { Button, Portal, cx } from '../../ui'
+import { useTaskActions } from '../tasks/useTaskActions'
+import { useSpokenTasks } from '../chat/useSpokenTasks'
+import { VoicePanel } from './VoicePanel'
 import type { Phase } from '../../lib/liveVoice'
 import { VOICE_TAP_LABEL } from '../../lib/hotkeys'
 
@@ -53,6 +56,71 @@ export function VoiceOverlay() {
   const v = useVoice()
   const [showSettings, setShowSettings] = useState(false)
 
+  /**
+   * What Oscar just talked about, pulled up on the right.
+   *
+   * Voice tells you "you have one task for today: Verify Oscar task cards at six PM"
+   * and then it is gone — spoken words leave nothing to act on. The reply text is
+   * already on screen as the caption, and the task list is one existing call
+   * (`GET /tasks/{user_id}`), so the cards are a match between the two. Nothing is
+   * added to the relay, the agent or the tool bridge.
+   */
+  const { pool: taskList, patch, reload: reloadTasks } = useSpokenTasks()
+  const { toggle, busyId } = useTaskActions(patch, reloadTasks)
+
+  /**
+   * 🔴 STICKY, NOT DERIVED — and that is the whole behaviour of this panel.
+   *
+   * The first version computed the cards from `v.reply` directly. It worked for about
+   * a second: as soon as Oscar finished speaking the phase went back to `listening`
+   * and the provider cleared the caption, so the panel emptied itself and the cards
+   * vanished while the user was still looking at them. A spoken reply is transient by
+   * nature; what it was ABOUT should not be.
+   *
+   * So the last non-empty match is held until it is REPLACED by a later reply that
+   * names something, or dismissed, or the call ends. A reply that names nothing —
+   * a greeting, a confirmation — leaves what is on screen alone.
+   */
+  const [pinned, setPinned] = useState<number[]>([])
+
+  // 🔴 IDS FROM THE RELAY, NOT A MATCH ON THE SPOKEN TEXT. Gemini paraphrases every
+  // reply — "Prepare the vendor onboarding deck" is spoken as "preparing the vendor
+  // onboarding deck" — so matching the transcript against titles found nothing on all
+  // four of a test user's tasks. Oscar reports the ids its own tools returned, and an
+  // id cannot be conjugated.
+  const matched = useMemo(() => v.items.map(i => i.id), [v.items])
+
+  useEffect(() => {
+    // Only ever REPLACES a non-empty result. Comparing by joined ids so an identical
+    // set does not re-set state on every caption token.
+    if (matched.length > 0) {
+      setPinned(prev => (prev.join() === matched.join() ? prev : matched))
+    }
+  }, [matched])
+
+  /**
+   * Cleared when a call STARTS, not when one ends.
+   *
+   * 🔴 Clearing on end looked equivalent and was wrong: tapping Edit ends the call
+   * on purpose (the mic must not be open while you type), so clearing there wiped
+   * the panel out from under the edit form the user had just opened. Clearing on
+   * start gives the same guarantee that matters — a new call never opens showing the
+   * last one's tasks — while letting the cards survive the call they came from.
+   */
+  useEffect(() => { if (v.running) setPinned([]) }, [v.running])
+
+  // Resolved fresh from the list every render, so a card completed in the panel shows
+  // its new state instead of the snapshot it was matched with.
+  const named = useMemo(
+    () => pinned.map(id => taskList.find(t => t.id === id)).filter((t): t is NonNullable<typeof t> => !!t),
+    [pinned, taskList])
+
+  // A spoken turn can CREATE the task it then describes, and a pool fetched when the
+  // overlay opened cannot contain it. Re-read when Oscar starts speaking.
+  useEffect(() => {
+    if (v.phase === 'speaking') reloadTasks()
+  }, [v.phase, reloadTasks])
+
   const onOrbTap = useCallback(() => {
     // One control, three meanings in priority order: interrupt a reply, else start
     // a call, else do nothing — the call is live and listening, and a tap should
@@ -84,9 +152,12 @@ export function VoiceOverlay() {
 
   return (
     <Portal>
-      <div className="fade fixed inset-0 z-[60] flex flex-col"
+      <div className="fade fixed inset-0 z-[60] flex"
            style={{ background: 'var(--bg)' }}
            role="dialog" aria-modal="true" aria-label="Talk to Oscar">
+        {/* The voice screen keeps its own full-height column; the panel is a sibling,
+            so adding it cannot shift the orb or the footer. */}
+        <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between px-4 py-3.5 sm:px-6">
           <div className="flex items-center gap-2 text-sm font-semibold">
             <Mic className="size-4" style={{ color: 'var(--accent)' }} /> Voice
@@ -221,6 +292,13 @@ export function VoiceOverlay() {
             <span><Kbd>{VOICE_TAP_LABEL}</Kbd> from anywhere</span>
           </p>
         </footer>
+        </div>
+
+        {/* ── what Oscar just mentioned, on the right ─────────────────── */}
+        <VoicePanel tasks={named} onToggle={tk => void toggle(tk)}
+                    busyId={busyId} onChanged={reloadTasks}
+                    onDismiss={() => setPinned([])}
+                    onEditStart={v.end} />
       </div>
     </Portal>
   )

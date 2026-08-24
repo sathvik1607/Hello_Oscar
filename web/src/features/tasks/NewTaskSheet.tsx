@@ -88,10 +88,10 @@ export function NewTaskSheet({ onClose, onCreated, task }: {
   return (
     <Portal>
       <button aria-label="Close" onClick={onClose}
-              className="fade fixed inset-0 z-40 bg-black/30" />
+              className="fade fixed inset-0 z-[70] bg-black/30" />
       <div
         role="dialog" aria-modal="true" aria-label={editing ? 'Edit task' : 'New task'}
-        className="rise fixed inset-x-0 bottom-0 z-50 rounded-t-3xl border-t p-5
+        className="rise fixed inset-x-0 bottom-0 z-[71] rounded-t-3xl border-t p-5
                    sm:inset-0 sm:m-auto sm:h-fit sm:max-w-md sm:rounded-2xl sm:border"
         style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border)',
                  paddingBottom: 'calc(env(safe-area-inset-bottom) + 20px)' }}

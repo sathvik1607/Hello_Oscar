@@ -7,6 +7,12 @@ import { useApi } from '../../lib/useApi'
 import { subscribe, watchConnection, type ConnState } from '../../lib/appSocket'
 import { messageTime } from '../../lib/format'
 import { useVoice } from '../voice/VoiceProvider'
+import { InlineCards, OscarPanel } from './OscarPanel'
+import { matchReplyTasks } from './replyTasks'
+import { useSpokenTasks } from './useSpokenTasks'
+import { TaskDetail } from '../tasks/TaskDetail'
+import { useTaskActions } from '../tasks/useTaskActions'
+import type { Task } from '../../lib/types'
 import {
   Button, Card, EmptyState, IconButton, Skeleton, cx, inputCls, inputStyle,
 } from '../../ui'
@@ -65,6 +71,11 @@ export function ChatScreen() {
   const [atBottom, setAtBottom] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [showSessions, setShowSessions] = useState(false)
+  /** The task open beside the conversation. Held here, not in the bubble, so only one
+   *  is ever open and the pane survives new turns arriving above it. */
+  const [openTask, setOpenTask] = useState<Task | null>(null)
+  const [wide, setWide] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches)
 
   const scroller = useRef<HTMLDivElement>(null)
   const { openVoice } = useVoice()
@@ -74,8 +85,35 @@ export function ChatScreen() {
   // depending on `sessions` itself would re-subscribe on every render.
   const reloadSessions = sessions.reload
   const suggestions = useApi(s => assistant.suggestions(s))
+  /**
+   * The tasks a reply can be matched against — mine, what I delegated, and the
+   * team's, deduped. Shared with the voice overlay so the two cannot disagree about
+   * which tasks Oscar is allowed to have named. See useSpokenTasks.
+   */
+  const { pool: taskList, patch, reload: reloadTasks } = useSpokenTasks()
+
+  // Completing from a card behaves exactly as it does on Today or Tasks — same
+  // optimistic update, same rollback, same refusal to route a completion through
+  // PATCH /items.
+  const { toggle, busyId } = useTaskActions(patch, reloadTasks)
 
   useEffect(() => watchConnection(setConn), [])
+
+  /**
+   * Side by side above `lg`, a sheet below it.
+   *
+   * A JS media query rather than CSS, because the two are different COMPONENT TREES,
+   * not two styles: `TaskDetail` as a sheet is modal and portalled out of the layout,
+   * as a column it is a plain flex child. Rendering both and hiding one with
+   * `lg:hidden` would mount two copies of the comment thread — every comment fetched
+   * twice, and posted into two live subscriptions.
+   */
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)')
+    const on = () => setWide(mq.matches)
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
 
   // ── frames ────────────────────────────────────────────────────────────────
   useEffect(() => subscribe(f => {
@@ -139,9 +177,13 @@ export function ChatScreen() {
         // The session's title and preview are derived from the first message, so
         // the list is stale until this lands.
         reloadSessions()
+        // And so is the task list: the turn may have CREATED the task the reply is
+        // about ("reminder set for 7 PM"), and a card cannot be matched against a
+        // list that predates it.
+        reloadTasks()
         break
     }
-  }), [reloadSessions])
+  }), [reloadSessions, reloadTasks])
 
   // ── autoscroll, but only when the user is already at the bottom ───────────
   // Yanking the view down while someone is reading back through the conversation
@@ -237,8 +279,37 @@ export function ChatScreen() {
   const chips = useMemo(() => suggestions.data?.suggestions?.slice(0, 4) ?? [], [suggestions.data])
   const list = sessions.data?.sessions ?? []
 
+  /**
+   * The tasks the LATEST answer named — the panel shows one set, not a history.
+   *
+   * Derived from the last finished assistant turn rather than accumulated across the
+   * conversation: cards from three questions ago competing with the current answer is
+   * exactly what moving this out of the transcript was meant to fix.
+   */
+  const panelTasks = useMemo(() => {
+    for (let i = turns.length - 1; i >= 0; i--) {
+      const t = turns[i]
+      if (t.role !== 'assistant' || t.live) continue
+      return matchReplyTasks(t.text, taskList)
+    }
+    return []
+  }, [turns, taskList])
+
+  // The panel is shown for a task OR for a list — either is a reason to split.
+  const splitOpen = wide && (openTask !== null || panelTasks.length > 0)
+
+  // Re-read the open task out of the refreshed list, so completing or editing it in
+  // the pane is reflected in the pane itself and in the card behind it.
+  const paneTask = openTask
+    ? (taskList.find(t => t.id === openTask.id) ?? openTask)
+    : null
+
   return (
-    <div className="flex h-[calc(100dvh-190px)] flex-col lg:h-[calc(100dvh-150px)]">
+    /* The row IS the split: Oscar keeps its own column and stays usable while a task
+       is open beside it. That is the point — you asked for the task in this
+       conversation, so acting on it should not take the conversation away. */
+    <div className="flex h-[calc(100dvh-190px)] gap-3 lg:h-[calc(100dvh-150px)]">
+    <div className="flex min-w-0 flex-1 flex-col">
       {/* ── toolbar ──────────────────────────────────────────────────── */}
       <div className="mb-3 flex items-center gap-2">
         <Button size="sm" onClick={newChat}><Plus className="size-3.5" /> New</Button>
@@ -296,7 +367,11 @@ export function ChatScreen() {
               body="Reminders, meetings, what's due — say it the way you'd say it to a person."
             />
           ) : (
-            turns.map(t => <Bubble key={t.key} turn={t} />)
+            turns.map(t => (
+              <Bubble key={t.key} turn={t} tasks={taskList} wide={wide}
+                      busyId={busyId} onOpen={setOpenTask}
+                      onToggle={tk => void toggle(tk)} />
+            ))
           )}
         </div>
 
@@ -367,10 +442,36 @@ export function ChatScreen() {
         </div>
       </Card>
     </div>
+
+      {/* ── pulled up beside the conversation, never inside it ────────── */}
+      {splitOpen && (
+        <div className="fade hidden w-[420px] shrink-0 lg:block xl:w-[460px]">
+          <OscarPanel tasks={panelTasks} openTask={paneTask}
+                      onOpen={setOpenTask} onBack={() => setOpenTask(null)}
+                      onToggle={tk => void toggle(tk)} busyId={busyId}
+                      onChanged={reloadTasks} />
+        </div>
+      )}
+
+      {/* Below lg there is no side to put a panel on, so a tapped task opens as the
+          modal sheet it is on every other screen. */}
+      {!wide && paneTask && (
+        <TaskDetail task={paneTask}
+                    onClose={() => setOpenTask(null)}
+                    onChanged={reloadTasks} />
+      )}
+    </div>
   )
 }
 
-function Bubble({ turn }: { turn: Turn }) {
+function Bubble({ turn, tasks, onOpen, onToggle, busyId, wide }: {
+  turn: Turn
+  tasks: Task[]
+  onOpen: (t: Task) => void
+  onToggle: (t: Task) => void
+  busyId?: number | null
+  wide: boolean
+}) {
   const mine = turn.role === 'user'
   return (
     <div className={cx('flex', mine ? 'justify-end' : 'justify-start')}>
@@ -405,6 +506,15 @@ function Bubble({ turn }: { turn: Turn }) {
             </span>
           )}
         </div>
+        {/* 🔴 NARROW SCREENS ONLY. On a wide screen these live in the side panel,
+            and rendering them here as well would show the same tasks twice — plus a
+            stale copy under every earlier answer. `wide` is the switch, not a
+            breakpoint class, because the two are different trees. */}
+        {!mine && !turn.live && !wide && (
+          <InlineCards tasks={matchReplyTasks(turn.text, tasks)} onOpen={onOpen}
+                       onToggle={onToggle} busyId={busyId} />
+        )}
+
         {turn.at && !turn.live && (
           <div className={cx('mt-1 px-1 text-[11px] tabular-nums',
                              mine ? 'text-right' : 'text-left')}

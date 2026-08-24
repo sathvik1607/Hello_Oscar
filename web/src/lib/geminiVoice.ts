@@ -64,6 +64,21 @@ import { GEMINI_VOICES } from './speakers'
 import { wakeStrip } from './wakeWord'
 import type { Handlers, Phase } from './liveVoice'
 
+/** One task/meeting Oscar's answer referred to. Ids only — the client resolves them
+ *  against task data it already holds. */
+export type OscarItem = { id: number; type: 'task' | 'meeting' }
+
+/**
+ * `Handlers` plus the one signal the Sarvam engine has no equivalent for.
+ *
+ * Extended HERE rather than in `liveVoice.ts`, which is the shipping Sarvam engine
+ * and stays untouched. `onItems` is optional, so every existing caller still
+ * satisfies the type and the two engines remain interchangeable.
+ */
+export type GeminiHandlers = Handlers & {
+  onItems?: (items: OscarItem[]) => void
+}
+
 const FRAME_MS = 100
 /** Fixed by the Live API. Sending the browser's native 48 kHz makes Gemini hear
  *  speech at a third speed and transcribe gibberish rather than erroring. */
@@ -120,7 +135,7 @@ function toGeminiVoice(speaker: string | undefined): string {
 }
 
 export class GeminiVoice {
-  private h: Handlers
+  private h: GeminiHandlers
   private userId: number
   private voice: string
   private ws?: WebSocket
@@ -161,7 +176,7 @@ export class GeminiVoice {
    *  opened — voice keeps working, it just leaves no history. */
   private sessionId: number | null = null
 
-  constructor(h: Handlers, userId: number = getUser()?.id ?? 0, speaker?: string) {
+  constructor(h: GeminiHandlers, userId: number = getUser()?.id ?? 0, speaker?: string) {
     this.h = h
     this.userId = userId
     this.voice = toGeminiVoice(speaker)
@@ -256,6 +271,24 @@ export class GeminiVoice {
       this.toolRan = true
       this.h.onTool?.(true)
       this.h.onPhase('thinking')
+      return
+    }
+    /**
+     * The task/meeting ids Oscar's answer referred to. Injected by the relay, not
+     * part of Google's protocol.
+     *
+     * 🔴 THIS EXISTS BECAUSE GEMINI PARAPHRASES. Oscar's answer says "Prepare the
+     * vendor onboarding deck"; Gemini speaks it as "preparing the vendor onboarding
+     * deck". Every verb is conjugated, so matching the spoken transcript against
+     * task titles finds nothing — measured on all four of a test user's tasks. Ids
+     * cannot be paraphrased, so the relay sends those instead and the browser never
+     * has to guess what was meant.
+     */
+    if (Array.isArray(msg.oscarItems)) {
+      const items = (msg.oscarItems as unknown[])
+        .filter((i): i is OscarItem =>
+          !!i && typeof (i as OscarItem).id === 'number')
+      if (items.length > 0) this.h.onItems?.(items)
       return
     }
     // Injected by the relay, not part of Google's protocol.

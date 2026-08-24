@@ -290,22 +290,28 @@ function Comment({ comment, mine }: { comment: TaskComment; mine: boolean }) {
           </span>
         </div>
 
+        {/* 🔴 THE FILE COMES FIRST, and the note about it sits underneath.
+            It used to be the other way round, which reads backwards: someone
+            attaches a contract and types "check clause 4" — the sentence is a
+            caption for the file, so showing the caption above a file you cannot see
+            yet makes it a riddle. Every messaging app puts the attachment first for
+            the same reason. */}
+        {!!comment.attachments?.length && (
+          <div className={cx('mt-1 flex flex-col gap-1.5', mine && 'items-end')}>
+            {comment.attachments.map(a => <AttachmentChip key={a.id} attachment={a} />)}
+          </div>
+        )}
+
         {/* A file-only comment is legal, so the bubble renders only when there is
-            text — otherwise an empty bubble sits above the chip. */}
+            text — otherwise an empty bubble sits below the chip. */}
         {comment.body.trim() && (
-          <div className={cx('mt-1 inline-block rounded-2xl px-3 py-2 text-left',
+          <div className={cx('mt-1.5 inline-block rounded-2xl px-3 py-2 text-left',
                              'text-sm leading-relaxed',
                              mine ? 'rounded-br-md' : 'rounded-bl-md')}
                style={mine
                  ? { background: 'var(--accent)', color: '#fff' }
                  : { background: 'var(--bg-sunken)', color: 'var(--text)' }}>
             <span className="whitespace-pre-wrap break-words">{comment.body}</span>
-          </div>
-        )}
-
-        {!!comment.attachments?.length && (
-          <div className={cx('mt-2 flex flex-col gap-1.5', mine && 'items-end')}>
-            {comment.attachments.map(a => <AttachmentChip key={a.id} attachment={a} />)}
           </div>
         )}
       </div>

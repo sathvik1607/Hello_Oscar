@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Check, ChevronDown, Clock, Flag, Pencil, Trash2, Users, X } from 'lucide-react'
 import { ApiError, tasks as tasksApi } from '../../lib/api'
 import { getUser } from '../../lib/session'
@@ -31,10 +31,22 @@ import {
  * otherwise and is stale. The composer is worded to match reality: implying a
  * comment will reschedule the task, when it will not, is worse than not offering it.
  */
-export function TaskDetail({ task, onClose, onChanged }: {
+export function TaskDetail({ task, onClose, onChanged, inline, onEditStart }: {
   task: Task
   onClose: () => void
   onChanged: () => void
+  /** Fired the moment the edit form opens.
+   *
+   *  Exists for the VOICE panel: the microphone is open for the whole call, so
+   *  typing into a form while Oscar is listening means every word said in the room —
+   *  and anything read aloud while typing — becomes an utterance. The voice screen
+   *  passes `end` here so editing ends the call, and the user restarts it
+   *  deliberately with Shift Shift. Unused everywhere else. */
+  onEditStart?: () => void
+  /** Render as a COLUMN in the page rather than a sheet over it. Used by the Oscar
+   *  screen, where the task sits beside the conversation that produced it — see
+   *  `Frame` at the bottom of this file for why it is one component and not two. */
+  inline?: boolean
 }) {
   const me = getUser()
   const [err, setErr] = useState<string | null>(null)
@@ -104,15 +116,7 @@ export function TaskDetail({ task, onClose, onChanged }: {
   ] as [string, string][]), [task])
 
   return (
-    <Portal>
-      <button aria-label="Close" onClick={onClose}
-              className="fade fixed inset-0 z-[55] bg-black/35" />
-      <aside
-        role="dialog" aria-modal="true" aria-label={task.title}
-        className="fixed inset-y-0 right-0 z-[56] flex w-full flex-col border-l shadow-2xl
-                   sm:max-w-[540px]"
-        style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border)' }}
-      >
+    <Frame inline={inline} label={task.title} onClose={onClose}>
         {/* ── header ─────────────────────────────────────────────────── */}
         <header className="flex items-start gap-3 border-b px-5 py-4"
                 style={{ borderColor: 'var(--border)' }}>
@@ -220,7 +224,8 @@ export function TaskDetail({ task, onClose, onChanged }: {
               <Check className="size-3.5" /> {done ? 'Reopen' : 'Mark complete'}
             </Button>
             {!confirmDelete && (
-              <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>
+              <Button size="sm" variant="secondary"
+                      onClick={() => { onEditStart?.(); setEditing(true) }}>
                 <Pencil className="size-3.5" /> Edit
               </Button>
             )}
@@ -281,6 +286,50 @@ export function TaskDetail({ task, onClose, onChanged }: {
         </div>
 
         <CommentComposer t={thread} />
+    </Frame>
+  )
+}
+
+/**
+ * Sheet, or column — the same body either way.
+ *
+ * One component rather than two copies of the detail view. The alternative was a
+ * separate inline component, and the reason not to is concrete: this file's header,
+ * details block, assignee list, actions and comment thread are the contract with the
+ * Flutter screen, and a second copy is a second place for that contract to drift.
+ *
+ * The SHEET is modal — overlay, `aria-modal`, portalled to `document.body` because
+ * AppShell wraps every screen in a transformed element and a transformed ancestor
+ * captures `position: fixed`. The COLUMN is not modal: it sits in the layout, has no
+ * overlay to dismiss, and must NOT be `aria-modal` or a screen reader would report
+ * the conversation beside it as unavailable.
+ */
+function Frame({ inline, label, onClose, children }: {
+  inline?: boolean
+  label: string
+  onClose: () => void
+  children: ReactNode
+}) {
+  if (inline) {
+    return (
+      <section aria-label={label}
+               className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border"
+               style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border)' }}>
+        {children}
+      </section>
+    )
+  }
+  return (
+    <Portal>
+      <button aria-label="Close" onClick={onClose}
+              className="fade fixed inset-0 z-[55] bg-black/35" />
+      <aside
+        role="dialog" aria-modal="true" aria-label={label}
+        className="fixed inset-y-0 right-0 z-[56] flex w-full flex-col border-l shadow-2xl
+                   sm:max-w-[540px]"
+        style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border)' }}
+      >
+        {children}
       </aside>
     </Portal>
   )
