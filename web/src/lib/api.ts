@@ -165,6 +165,17 @@ export const tasks = {
     request<{ count: number; tasks: Task[] }>(
       `/tasks/${requireUserId()}?status=completed`, { signal }),
 
+  /** One status at a time.
+   *
+   *  🔴 NOT a client-side filter over `mine()`. That endpoint is capped at 100 rows
+   *  ordered by created_at DESC (item_service.get_tasks), and those 100 are shared
+   *  across every status — measured on a real account: 119 completed tasks existed
+   *  while the plain list showed 73 of them, so 46 were invisible. Asking the server
+   *  for one status spends the whole budget on the rows being displayed. */
+  byStatus: (status: 'pending' | 'in_progress' | 'completed', signal?: AbortSignal) =>
+    request<{ count: number; tasks: Task[] }>(
+      `/tasks/${requireUserId()}?status=${status}`, { signal }),
+
   assignedByMe: (signal?: AbortSignal) =>
     request<{ count: number; tasks: Task[] }>(
       `/tasks/${requireUserId()}/assigned-by-me`, { signal }),
@@ -173,6 +184,10 @@ export const tasks = {
     title: string; description?: string; due_at?: string | null
     priority?: string; assigned_to_user_id?: number | null
     assigned_to_user_ids?: number[]; item_type?: 'task'
+    /** Project task (the backend's default) vs personal. `is_project=0` hides it from
+     *  `GET /teams/{id}/tasks?project=true`, i.e. from My Team — which is the whole
+     *  point of the distinction. */
+    is_project?: boolean
   }) => request<Task>('/items', {
     method: 'POST', body: { ...body, user_id: requireUserId(), item_type: 'task' },
   }),

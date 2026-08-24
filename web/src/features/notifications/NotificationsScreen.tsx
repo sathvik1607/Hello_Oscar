@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Bell, CalendarClock, CheckCircle2, CheckSquare, MessageSquare, UserPlus,
 } from 'lucide-react'
-import { notifications as notifApi } from '../../lib/api'
+import { notifications as notifApi, team as teamApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { subscribe } from '../../lib/appSocket'
+import { getUser } from '../../lib/session'
 import { messageTime, parseIstNaive } from '../../lib/format'
 import type { AppNotification, NotificationType } from '../../lib/types'
 import type { SectionId } from '../../shell/nav'
@@ -37,11 +38,54 @@ const ROUTE: Partial<Record<NotificationType, SectionId>> = {
   task_assigned: 'tasks', task_reminder: 'tasks', task_updated: 'tasks',
   task_completed: 'tasks', task_deleted: 'tasks', task_comment: 'tasks',
   meeting_update: 'calendar', meeting_comment: 'calendar',
-  direct_message: 'chat',
+  /* 🔴 'messages', NOT 'chat'. This said 'chat' — which in this app is OscarAI, the
+     assistant — so tapping "💬 Sriram: hi" opened a conversation with the AI instead
+     of with Sriram. The two most confusable section names in the product point at
+     opposite things (see shell/nav.ts), and this was the bug that mistake produces. */
+  direct_message: 'messages',
+  /* An update request and its answer are both team work, and the only screen that
+     shows them is My Team. Previously absent from this table entirely, so those rows
+     were dead to the touch. */
+  update_request: 'team', update_response: 'team',
+  /* kiosk_lead is deliberately NOT here. The lead exists only in the notification's
+     own text — there is no lead row, no list endpoint and no screen — so any
+     destination would be a dead end. It stays readable in place, which is honest.
+     (This is the same gap that makes the mobile push land on "Page Not Found".) */
 }
 
-export function NotificationsScreen({ onNavigate }: { onNavigate: (s: SectionId) => void }) {
+/** The sender's name out of "💬 Sriram: hi".
+ *
+ *  The DB row for a DM carries NO peer id — `notification_service.send` is called
+ *  without one, and only the FCM payload gets `peer_id`. So the name in the message
+ *  is the sole way back to the conversation from the Activity list, and it is a
+ *  fixed server-side format (`f"💬 {sender_name}: {message}"`), not a guess.
+ *
+ *  🔴 LONGEST NAME FIRST, and the match must be anchored at the start. With members
+ *  "Sri" and "Sriram", a short-first scan resolves Sriram's message to Sri and opens
+ *  the wrong person's thread — the same wrong-recipient class this project already
+ *  has a live incident from. Returns null rather than a best guess when nothing
+ *  matches exactly. */
+function dmPeerFrom(message: string, roster: { user_id: number; name: string }[]): number | null {
+  const body = message.replace(/^💬\s*/, '')
+  let best: { id: number; len: number } | null = null
+  for (const m of roster) {
+    if (!m.name) continue
+    if (!body.toLowerCase().startsWith(`${m.name.toLowerCase()}:`)) continue
+    if (!best || m.name.length > best.len) best = { id: m.user_id, len: m.name.length }
+  }
+  return best?.id ?? null
+}
+
+export function NotificationsScreen({ onNavigate }: {
+  onNavigate: (s: SectionId,
+               target?: { id: number; thread?: boolean; peer?: boolean }) => void
+}) {
   const n = useApi(s => notifApi.list(false, s), [], 'notifications')
+  const me = getUser()
+  // Shares the 'members' cache key with every other screen, so it costs no request.
+  const roster = useApi(s => (me?.team_id ? teamApi.members(me.team_id, s)
+                                         : Promise.resolve([])),
+                        [me?.team_id], 'members')
   const [live, setLive] = useState<AppNotification[]>([])
   const [busy, setBusy] = useState(false)
   const [filter, setFilter] = useState<'all' | 'unread'>('all')
@@ -98,8 +142,30 @@ export function NotificationsScreen({ onNavigate }: { onNavigate: (s: SectionId)
       try { await notifApi.markRead(row.id) } catch { n.reload() }
     }
     const dest = ROUTE[row.type]
-    if (dest) onNavigate(dest)
-  }, [n, onNavigate])
+    if (!dest) return
+    /**
+     * Same two signals the Flutter app sends (fcm_service._routeWithTarget):
+     *   · the item id, so the screen can scroll to and glow the exact row
+     *   · thread=1 for any type containing "comment", so the task's detail — where
+     *     the comment thread lives — opens on top rather than the row merely glowing
+     *
+     * 🔴 item_id IS NOT A FOREIGN KEY. Four rows in this database already point at
+     * deleted items, so a target can legitimately resolve to nothing; the screen has
+     * to treat a miss as "that item is gone", not as a blank sheet. And
+     * `meeting_update` rows carry item_id = NULL, so those still land on the section
+     * only — which is why the id is passed conditionally rather than assumed.
+     */
+    if (row.type === 'direct_message') {
+      // Resolved from the message text because the row has no peer id. A miss lands
+      // on the Chats list, which is still the right screen — never a wrong thread.
+      const peer = dmPeerFrom(row.message, roster.data ?? [])
+      onNavigate(dest, peer ? { id: peer, peer: true } : undefined)
+      return
+    }
+    onNavigate(dest, row.item_id
+      ? { id: row.item_id, thread: row.type.includes('comment') }
+      : undefined)
+  }, [n, onNavigate, roster.data])
 
   return (
     <div className="space-y-4">

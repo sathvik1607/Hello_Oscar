@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Clock, MapPin, Pencil, Trash2, Users, X } from 'lucide-react'
 import { ApiError, tasks as itemsApi } from '../../lib/api'
 import { dayLabel, istNow, parseIstNaive, timeLabel } from '../../lib/format'
@@ -23,12 +23,23 @@ import { Badge, Button, IconButton, Portal, STATUS_LABEL, cx, Linkify} from '../
  * showing it. `POST /meetings` creates ONE shared row rather than a copy per
  * invitee, so cancelling here is seen by everyone on it.
  */
-export function MeetingDetail({ meeting, onClose, onChanged }: {
+export function MeetingDetail({ meeting, onClose, onChanged, focusThread }: {
   meeting: Meeting
   onClose: () => void
   onChanged: () => void
+  /** Opened from a `meeting_comment` notification — same contract as TaskDetail's,
+   *  because the same endpoint serves both and a meeting comment is not a lesser
+   *  kind of comment. */
+  focusThread?: boolean
 }) {
   const thread = useCommentThread(meeting.id, onChanged)
+  /* Keyed on the rows ARRIVING, not on mount — see TaskDetail. */
+  const threadRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!focusThread || thread.loading) return
+    requestAnimationFrame(() =>
+      threadRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' }))
+  }, [focusThread, thread.loading])
   const [editing, setEditing] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [confirm, setConfirm] = useState(false)
@@ -187,7 +198,7 @@ export function MeetingDetail({ meeting, onClose, onChanged }: {
             * It only takes effect when there is slack. Once the thread is long
             * enough to overflow, this is inert and the region simply scrolls.
             */}
-          <div className="mt-auto pt-6">
+          <div ref={threadRef} className="mt-auto pt-6">
             <CommentList t={thread} />
           </div>
         </div>

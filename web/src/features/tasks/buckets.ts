@@ -1,5 +1,7 @@
 import type { Task } from '../../lib/types'
-import { isToday, istNow, parseIstNaive } from '../../lib/format'
+import {
+  dayLabel, isToday, isTomorrow, istDateKey, istNow, parseIstNaive,
+} from '../../lib/format'
 
 /**
  * The order tasks are shown in.
@@ -90,9 +92,77 @@ export function todayTimeline(tasks: Task[]): Task[] {
  *  both show an empty list. */
 export function completedToday(tasks: Task[]): Task[] {
   const today = istNow()
-  return tasks.filter(t => {
-    if (t.status !== 'completed') return false
-    const at = parseIstNaive(t.completed_at)
-    return at && isToday(at) && at <= today
-  })
+  return tasks
+    .filter(t => {
+      if (t.status !== 'completed') return false
+      const at = parseIstNaive(t.completed_at)
+      return at && isToday(at) && at <= today
+    })
+    // 🔴 SORTED, like todayTimeline above — this was the one bucket that filtered and
+    // then returned whatever order the API happened to give, which is id order. On a
+    // real day it rendered 6:35, 5:30, 5:30, 5:00, 7:00 and read as a bug.
+    //
+    // By DUE time, not completed_at, because the due time is what the card actually
+    // prints (dueLabel(due) in TaskCard). Sorting on a field the row does not show
+    // would leave it looking just as unordered.
+    .sort(byDueAsc)
+}
+
+
+/**
+ * DATE sections, with due time ascending inside each.
+ *
+ * 🔴 STATUS NO LONGER DECIDES WHERE A TASK GOES. `bucketOf` above put anything
+ * `in_progress` into its own section first, so a task started this morning left
+ * Today's list and appeared under a status heading — two different questions
+ * ("when is this due", "how far along is it") answered by one axis. Status is a
+ * FILTER now; the day owns the ordering.
+ *
+ * Sections, top to bottom:
+ *   Overdue     past its time and still open — the only one that is a problem
+ *   Today · Tomorrow
+ *   a named day  "Mon 25 Aug", ascending — soonest first
+ *   No date      cannot be late, so it sits after everything dated
+ *
+ * Keyed on istDateKey, the IST calendar day, so a task due 23:30 stays on its own
+ * date instead of being pushed into the next one by the browser's offset.
+ */
+export type DateSection = { key: string; label: string; tasks: Task[] }
+
+export function groupByDueDate(tasks: Task[]): DateSection[] {
+  const out: (DateSection & { rank: number })[] = []
+  const find = (key: string, label: string, rank: number) => {
+    let g = out.find(x => x.key === key)
+    if (!g) { g = { key, label, rank, tasks: [] }; out.push(g) }
+    return g
+  }
+  const todayKey = istDateKey(istNow())
+  for (const t of tasks) {
+    const due = parseIstNaive(t.due_at)
+    const key = due ? istDateKey(due) : null
+    if (!key)                     find('none', 'No date', 5).tasks.push(t)
+    else if (isToday(due))        find('today', 'Today', 1).tasks.push(t)
+    else if (isTomorrow(due))     find('tomorrow', 'Tomorrow', 2).tasks.push(t)
+    // FUTURE and PAST are separate ranks, not one bucket of "other dates". They sort
+    // in opposite directions, so sharing a rank made that impossible to express.
+    else if (key > todayKey)      find(key, dayLabel(due!), 3).tasks.push(t)
+    else                          find(key, dayLabel(due!), 4).tasks.push(t)
+  }
+  // Strictly by due time inside every section — status never affects this.
+  for (const g of out) g.tasks.sort(byDueAsc)
+  return out
+    .sort((a, b) => {
+      if (a.rank !== b.rank) return a.rank - b.rank
+      // 🔴 PAST DATES SORT DESCENDING — the bug this replaced. Every non-today date
+      // shared one rank and was compared with localeCompare ascending, so the Done
+      // view opened on 7 Jul and worked forwards: the oldest history first, with the
+      // days you actually care about buried at the bottom.
+      //
+      // The two directions are not a preference. A future date answers "what is
+      // next", so nearest first. A past date answers "what just happened", so most
+      // recent first. istDateKey is YYYY-MM-DD, which sorts lexically as it sorts
+      // chronologically, so one comparator serves both.
+      return a.rank === 4 ? b.key.localeCompare(a.key) : a.key.localeCompare(b.key)
+    })
+    .map(({ key, label, tasks }) => ({ key, label, tasks }))
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Check, ChevronDown, Clock, Flag, Pencil, Trash2, Users, X } from 'lucide-react'
 import { ApiError, tasks as tasksApi } from '../../lib/api'
 import { getUser } from '../../lib/session'
@@ -30,7 +30,8 @@ import {
  * otherwise and is stale. The composer is worded to match reality: implying a
  * comment will reschedule the task, when it will not, is worse than not offering it.
  */
-export function TaskDetail({ task, onClose, onChanged, inline, onEditStart }: {
+export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
+                            focusThread }: {
   task: Task
   onClose: () => void
   onChanged: () => void
@@ -46,6 +47,11 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart }: {
    *  screen, where the task sits beside the conversation that produced it — see
    *  `Frame` at the bottom of this file for why it is one component and not two. */
   inline?: boolean
+  /** Opened from a COMMENT notification. Scrolls the thread into view and focuses
+   *  the composer, so a "X commented on your task" tap lands on the comment rather
+   *  than on the description with the thread below the fold. Off by default: opening
+   *  a task normally should show the task. */
+  focusThread?: boolean
 }) {
   const me = getUser()
   const [err, setErr] = useState<string | null>(null)
@@ -60,6 +66,16 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart }: {
 
   const due = parseIstNaive(task.due_at)
   const done = task.status === 'completed'
+
+  /* Waits for the comments to LOAD before scrolling. Scrolling to an empty div puts
+     you at the bottom of the description and then the list renders below where you
+     are looking — so the scroll has to be keyed on the rows arriving, not on mount. */
+  const threadRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!focusThread || thread.loading) return
+    requestAnimationFrame(() =>
+      threadRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' }))
+  }, [focusThread, thread.loading])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -279,7 +295,7 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart }: {
             * It only takes effect when there is slack. Once the thread is long
             * enough to overflow, this is inert and the region simply scrolls.
             */}
-          <div className="mt-auto pt-6">
+          <div ref={threadRef} className="mt-auto pt-6">
             <CommentList t={thread} />
           </div>
         </div>

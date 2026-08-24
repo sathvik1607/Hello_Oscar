@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Menu, MoreHorizontal, X } from 'lucide-react'
+import { Menu, MoreHorizontal, X, Cog} from 'lucide-react'
 import { NAV, TITLES, type SectionId } from './nav'
 import { ConnectionBanner } from './ConnectionBanner'
 import { OscarButton } from '../features/voice/OscarButton'
@@ -21,7 +21,7 @@ import { cx } from '../ui'
  */
 export function AppShell({ section, onNavigate, children }: {
   section: SectionId
-  onNavigate: (s: SectionId) => void
+  onNavigate: (s: SectionId, target?: { id: number; thread?: boolean }) => void
   children: React.ReactNode
 }) {
   const user = getUser()
@@ -91,7 +91,19 @@ export function AppShell({ section, onNavigate, children }: {
         </nav>
 
         <div className="mt-auto space-y-3 px-2 pt-4">
-          <div className="flex items-center gap-2.5">
+          {/* 🔴 THE ACCOUNT BLOCK *IS* THE SETTINGS ENTRY. Settings was a tenth nav
+              row competing with Today, Calendar and the rest for attention, when it is
+              the one destination nobody visits daily. Every desktop app puts it under
+              the account, and it is already where the eye goes to check which account
+              is signed in.
+              A button rather than a link on the name: the whole block is the target,
+              so it is a comfortable hit area rather than an 11px line of text. */}
+          <button onClick={() => go('settings')}
+                  aria-current={section === 'settings' ? 'page' : undefined}
+                  className="flex w-full items-center gap-2.5 rounded-xl p-1.5 text-left transition
+                             hover:brightness-[.97]"
+                  style={section === 'settings'
+                    ? { background: 'var(--accent-soft)' } : undefined}>
             <Avatar name={user?.name ?? '?'} />
             <div className="min-w-0 flex-1">
               <div className="truncate text-[13px] font-medium">{user?.name}</div>
@@ -99,7 +111,8 @@ export function AppShell({ section, onNavigate, children }: {
                 {user?.email ?? user?.username}
               </div>
             </div>
-          </div>
+            <Cog className="size-4 shrink-0" style={{ color: 'var(--text-subtle)' }} />
+          </button>
           <button onClick={signOut}
                   className="text-[11px] font-medium transition hover:underline"
                   style={{ color: 'var(--text-subtle)' }}>

@@ -1,19 +1,20 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   CalendarDays, ChevronLeft, ChevronRight, MapPin, Plus, Users,
 } from 'lucide-react'
 import { meetings as meetingsApi, tasks as tasksApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
+import { getUser } from '../../lib/session'
 import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
 import {
   dayLabel, istDateKey, istNow, monthYearLabel, parseIstNaive, timeLabel,
 } from '../../lib/format'
 import type { Meeting, Task } from '../../lib/types'
-import { TaskDetail } from '../tasks/TaskDetail'
 import { MeetingDetail } from './MeetingDetail'
+import { TaskDetail } from '../tasks/TaskDetail'
 import { EditMeetingSheet } from './EditMeetingSheet'
 import {
-  Badge, Button, Card, EmptyState, ErrorState, Skeleton, cx,
+  Badge, Button, Card, EmptyState, ErrorState, SectionHeading, Skeleton, cx,
 } from '../../ui'
 
 /**
@@ -35,7 +36,12 @@ import {
  * Weekday columns start on MONDAY (Mo–Su), matching the app. Sunday-first would put
  * the weekend on both ends of the row.
  */
-export function CalendarScreen() {
+export function CalendarScreen({ target }: {
+  /** Deep-link from Activity. `{id}` jumps to the day the item falls on; `{id, thread}`
+   *  also opens its detail, where the comment thread lives. Mirrors the Flutter app's
+   *  `?highlight=<item_id>` / `&thread=1`. */
+  target?: { id: number; thread?: boolean } | null
+} = {}) {
   // The month being viewed, and the day selected inside it — two separate pieces of
   // state. Collapsing them means paging to another month drags the selection along
   // and the agenda changes under you.
@@ -44,8 +50,9 @@ export function CalendarScreen() {
   // A row on the calendar was previously inert, so there was no way to reach a
   // task's description, comments or files from here at all — the calendar showed
   // that something existed and then refused to open it.
-  const [openTask, setOpenTask] = useState<Task | null>(null)
   const [openMeeting, setOpenMeeting] = useState<Meeting | null>(null)
+  const [focusThread, setFocusThread] = useState(false)
+  const [openTask, setOpenTask] = useState<Task | null>(null)
   const [creating, setCreating] = useState(false)
 
   const m = useApi(s => meetingsApi.all(s), [], 'meetings:all')
@@ -77,6 +84,34 @@ export function CalendarScreen() {
     return map
   }, [m.data, t.data])
 
+  /**
+   * Land on the day the item actually falls on, then open it.
+   *
+   * A calendar deep-link has to move TWO things — the selected day and the month
+   * being viewed — or the agenda below still shows whichever day was already
+   * selected and the tap looks like it did nothing.
+   *
+   * Meetings are searched first, then tasks: both types route here (meeting_update,
+   * meeting_comment) and a task with a deadline also lives on this screen.
+   *
+   * 🔴 A MISS IS NORMAL. item_id is not a foreign key and meeting_update rows carry
+   * item_id = NULL, so an unresolvable target must leave the view exactly as it was.
+   */
+  useEffect(() => {
+    if (!target) return
+    const mt = (m.data?.meetings ?? []).find(x => x.id === target.id)
+    const tk = (t.data?.tasks ?? []).find(x => x.id === target.id)
+    const at = parseIstNaive(mt?.scheduled_at ?? tk?.due_at ?? null)
+    if (!at) return
+    setSelectedKey(istDateKey(at))
+    setMonthAnchor(new Date(Date.UTC(at.getFullYear(), at.getMonth(), 1, 12)))
+    // Opened for every type, not only comment ones — see the note in TasksScreen.
+    // The date is still moved first, so closing the sheet leaves you on the right day.
+    setFocusThread(!!target.thread)
+    if (mt) setOpenMeeting(mt)
+    else if (tk) setOpenTask(tk)
+  }, [target, m.data, t.data])
+
   const cells = useMemo(() => monthCells(monthAnchor), [monthAnchor])
 
   const selected = useMemo(() => {
@@ -92,6 +127,11 @@ export function CalendarScreen() {
     // can still show that the slot was claimed and then dropped. Hiding them makes
     // a cancelled 3pm meeting indistinguishable from one that never existed, and
     // the Flutter calendar renders them struck through for the same reason.
+    // The WHOLE day, meetings and deadlines together, in TIME order — which is the
+    // question a calendar is asked: what does this day look like, hour by hour. They
+    // are two different commitments, so they render as two different rows (a meeting
+    // card with a span, a task line with a single time) rather than being flattened
+    // into one look.
     const rows: Row[] = [
       ...bag.meetings.map(x => ({
         kind: 'meeting' as const, at: parseIstNaive(x.scheduled_at),
@@ -99,7 +139,20 @@ export function CalendarScreen() {
       ...bag.tasks.map(x => ({
         kind: 'task' as const, at: parseIstNaive(x.due_at), task: x })),
     ]
-    return rows.sort((a, b) => (a.at?.getTime() ?? 0) - (b.at?.getTime() ?? 0))
+    // MEETINGS FIRST, then tasks — each block in time order.
+    //
+    // Not a flat sort by time, deliberately. A meeting is a commitment to be
+    // somewhere at an hour you cannot move; a deadline is work you can shuffle
+    // around it. On a day like 09-Aug (7 meetings, 3 tasks) a purely chronological
+    // list opened on "Call the supplier — 08:00" and buried the meetings below it,
+    // which is the wrong answer to "what does this day look like".
+    //
+    // An item with no parsable time sorts to the top of its own block rather than
+    // being dropped — visible and out of order beats silently missing from the day
+    // it belongs to.
+    const order = (r: Row) => (r.kind === 'meeting' ? 0 : 1)
+    return rows.sort((a, b) =>
+      order(a) - order(b) || (a.at?.getTime() ?? 0) - (b.at?.getTime() ?? 0))
   }, [byDay, selectedKey])
 
   const step = useCallback((delta: number) => {
@@ -203,7 +256,18 @@ export function CalendarScreen() {
         </h2>
         {dayRows.length > 0 && (
           <span className="text-xs tabular-nums" style={{ color: 'var(--text-subtle)' }}>
-            {dayRows.length} {dayRows.length === 1 ? 'item' : 'items'}
+            {(() => {
+              // Counts the two KINDS separately. "5 items" tells you nothing about
+              // whether the day is meetings or deadlines, which is the first thing
+              // you want to know when you tap a date.
+              const mt = dayRows.filter(r => r.kind === 'meeting').length
+              const tk = dayRows.length - mt
+              const bits = [
+                mt ? `${mt} ${mt === 1 ? 'meeting' : 'meetings'}` : null,
+                tk ? `${tk} ${tk === 1 ? 'task' : 'tasks'}` : null,
+              ].filter(Boolean)
+              return bits.join(' · ')
+            })()}
           </span>
         )}
       </div>
@@ -224,20 +288,57 @@ export function CalendarScreen() {
       )}
 
       <div className="space-y-2">
-        {dayRows.map(row => row.kind === 'meeting'
-          ? <MeetingCard key={`m${row.meeting.id}`} meeting={row.meeting}
-                         at={row.at} end={row.end}
-                         onOpen={() => setOpenMeeting(row.meeting)} />
-          : <TaskRow key={`t${row.task.id}`} task={row.task} at={row.at}
-                     onOpen={() => setOpenTask(row.task)} />)}
+        {/* Headed blocks rather than one undifferentiated column.
+          *
+          * dayRows is already ordered meetings-then-tasks, so this only labels what
+          * the sort produced — it does not reorder anything. Splitting here rather
+          * than building two arrays upstream keeps a single source of truth for the
+          * order, and the counts in the day header are computed from the same list.
+          *
+          * A heading is rendered only when its block is non-empty: "TASKS 0" under an
+          * empty space says nothing a reader needs, and on most days one of the two
+          * blocks is empty. */}
+        {(() => {
+          const meetings = dayRows.filter(r => r.kind === 'meeting')
+          const tasks = dayRows.filter(r => r.kind === 'task')
+          return (
+            <>
+              {meetings.length > 0 && (
+                <div className="pt-1">
+                  <SectionHeading count={meetings.length}>Meetings</SectionHeading>
+                  <div className="space-y-2">
+                    {meetings.map(row => row.kind === 'meeting' && (
+                      <MeetingCard key={`m${row.meeting.id}`} meeting={row.meeting}
+                                   at={row.at} end={row.end}
+                                   onOpen={() => setOpenMeeting(row.meeting)} />
+                    ))}
+                  </div>
+                </div>
+              )}
+              {tasks.length > 0 && (
+                <div className={cx('pt-1', meetings.length > 0 && 'mt-5')}>
+                  <SectionHeading count={tasks.length}>Tasks</SectionHeading>
+                  <div className="space-y-2">
+                    {tasks.map(row => row.kind === 'task' && (
+                      <TaskRow key={`t${row.task.id}`} task={row.task} at={row.at}
+                               onOpen={() => setOpenTask(row.task)} />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )
+        })()}
       </div>
 
       {openTask && (
-        <TaskDetail task={openTask} onClose={() => setOpenTask(null)}
+        <TaskDetail task={openTask} focusThread={focusThread}
+                    onClose={() => { setOpenTask(null); setFocusThread(false) }}
                     onChanged={() => { t.reload(); m.reload() }} />
       )}
       {openMeeting && (
-        <MeetingDetail meeting={openMeeting} onClose={() => setOpenMeeting(null)}
+        <MeetingDetail meeting={openMeeting} focusThread={focusThread}
+                       onClose={() => { setOpenMeeting(null); setFocusThread(false) }}
                        onChanged={() => { m.reload(); t.reload() }} />
       )}
 
@@ -296,6 +397,7 @@ function Dots({ bag, inverted }: {
 function MeetingCard({ meeting, at, end, onOpen }: {
   meeting: Meeting; at: Date | null; end: Date | null; onOpen: () => void
 }) {
+  const me = getUser()
   const now = istNow()
   const live = !!at && !!end && at <= now && now <= end
   const past = !!end && end < now
@@ -341,10 +443,23 @@ function MeetingCard({ meeting, at, end, onOpen }: {
                 <MapPin className="size-3" /> {meeting.location}
               </span>
             )}
-            {!!meeting.attendees?.length && (
+            {/* The teammate INVITEE — a real account, who has this on their own
+                calendar and was notified. `attendees` below is free text for guests
+                who are NOT accounts, so the two are different things and showing
+                only the second hid whose meeting it actually is. */}
+            {meeting.assigned_to_name && (
               <span className="flex items-center gap-1">
-                <Users className="size-3" /> {meeting.attendees.join(', ')}
+                <Users className="size-3" />
+                {/* Same To: / From: shape as a task row, so one glance reads the
+                    same way whichever kind of row it lands on. */}
+                {meeting.assigned_to_name === me?.name
+                  ? 'you' : `With: ${meeting.assigned_to_name}`}
               </span>
+            )}
+            {!!meeting.attendees?.length && (
+              /* No icon: the invitee above already carries one, and two Users glyphs
+                 on one line reads as a rendering fault. */
+              <span>{meeting.attendees.join(', ')}</span>
             )}
           </div>
         </div>
@@ -353,9 +468,36 @@ function MeetingCard({ meeting, at, end, onOpen }: {
   )
 }
 
+function startOfMonth(d: Date): Date {
+  const key = istDateKey(d)          // the IST calendar day, not the browser's
+  const [y, m] = key.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, 1, 12))
+}
+
+/** Blanks for the days before the 1st, then one cell per day. Monday-first, so the
+ *  offset is `(weekday + 6) % 7` — JS weekdays are Sunday-based. */
+function monthCells(anchor: Date): ({ key: string; day: number } | null)[] {
+  const y = anchor.getUTCFullYear()
+  const mo = anchor.getUTCMonth()
+  const first = new Date(Date.UTC(y, mo, 1, 12))
+  const offset = (first.getUTCDay() + 6) % 7
+  const daysInMonth = new Date(Date.UTC(y, mo + 1, 0, 12)).getUTCDate()
+
+  const out: ({ key: string; day: number } | null)[] = Array(offset).fill(null)
+  for (let d = 1; d <= daysInMonth; d++) {
+    const p = (n: number) => String(n).padStart(2, '0')
+    out.push({ key: `${y}-${p(mo + 1)}-${p(d)}`, day: d })
+  }
+  // Pad to a whole number of rows so the card does not change height month to month.
+  while (out.length % 7 !== 0) out.push(null)
+  return out
+}
+
+
 function TaskRow({ task, at, onOpen }: {
   task: Task; at: Date | null; onOpen: () => void
 }) {
+  const me = getUser()
   // Same rule as the meeting above: struck through only when cancelled, dimmed
   // when closed either way. See the comment on MeetingCard.
   const cancelled = task.status === 'cancelled'
@@ -387,6 +529,23 @@ function TaskRow({ task, at, onOpen }: {
             {/* Overdue is irrelevant once a task is closed — the Flutter card
                 suppresses it the same way. */}
             {task.is_overdue && !closed && <Badge tone="overdue">Overdue</Badge>}
+            {/* WHO — which this row never said. A calendar of "Take water" and "Call
+                the supplier" gives no clue whether it is yours to do or something you
+                handed out, and on a lead's calendar most of it is the latter.
+                🔴 Branch on `is_mine`, NOT on assigned_to_user_id === me: that field
+                names only the PRIMARY assignee, so on a shared task it answers wrong
+                for everyone else. The owner line is skipped when the owner is you —
+                "from you" on your own task is a fact you supplied. */}
+            {!task.is_mine && task.assigned_to_name && (
+              <span className="text-xs" style={{ color: 'var(--text-subtle)' }}>
+                To: {task.assigned_to_name}
+              </span>
+            )}
+            {task.is_mine && task.owner_name && task.owner_user_id !== me?.id && (
+              <span className="text-xs" style={{ color: 'var(--text-subtle)' }}>
+                From: {task.owner_name}
+              </span>
+            )}
           </div>
         </div>
       </button>
@@ -397,28 +556,3 @@ function TaskRow({ task, at, onOpen }: {
 // ── grid maths ──────────────────────────────────────────────────────────────
 // Done in UTC at noon throughout. Midday means no arithmetic here can be pushed
 // into the neighbouring day by an offset, and IST has no DST to complicate it.
-
-function startOfMonth(d: Date): Date {
-  const key = istDateKey(d)          // the IST calendar day, not the browser's
-  const [y, m] = key.split('-').map(Number)
-  return new Date(Date.UTC(y, m - 1, 1, 12))
-}
-
-/** Blanks for the days before the 1st, then one cell per day. Monday-first, so the
- *  offset is `(weekday + 6) % 7` — JS weekdays are Sunday-based. */
-function monthCells(anchor: Date): ({ key: string; day: number } | null)[] {
-  const y = anchor.getUTCFullYear()
-  const mo = anchor.getUTCMonth()
-  const first = new Date(Date.UTC(y, mo, 1, 12))
-  const offset = (first.getUTCDay() + 6) % 7
-  const daysInMonth = new Date(Date.UTC(y, mo + 1, 0, 12)).getUTCDate()
-
-  const out: ({ key: string; day: number } | null)[] = Array(offset).fill(null)
-  for (let d = 1; d <= daysInMonth; d++) {
-    const p = (n: number) => String(n).padStart(2, '0')
-    out.push({ key: `${y}-${p(mo + 1)}-${p(d)}`, day: d })
-  }
-  // Pad to a whole number of rows so the card does not change height month to month.
-  while (out.length % 7 !== 0) out.push(null)
-  return out
-}

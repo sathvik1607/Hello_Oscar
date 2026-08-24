@@ -1,9 +1,8 @@
 import { useMemo, useState } from 'react'
-import { CalendarClock, CheckCircle2, Clock, Plus, Sun } from 'lucide-react'
+import { CalendarClock, CheckCircle2, Clock, Plus } from 'lucide-react'
 import { meetings as meetingsApi, tasks as tasksApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
-import { getUser } from '../../lib/session'
 import {
   dueLabel, isToday, istNow, parseIstNaive, timeLabel,
 } from '../../lib/format'
@@ -12,6 +11,7 @@ import { completedToday, todayTimeline } from '../tasks/buckets'
 import { TaskCard } from '../tasks/TaskCard'
 import { useTaskActions } from '../tasks/useTaskActions'
 import { TaskDetail } from '../tasks/TaskDetail'
+import { useUnreadComments } from '../tasks/useUnreadComments'
 import { NewTaskSheet } from '../tasks/NewTaskSheet'
 import { MeetingDetail } from '../calendar/MeetingDetail'
 import {
@@ -34,8 +34,11 @@ import {
  * ignored.
  */
 export function TodayScreen() {
-  const user = getUser()
   const [openTask, setOpenTask] = useState<Task | null>(null)
+  // Unread comments per task — the badge and the glow on each card, and the
+  // clear when one is opened. See useUnreadComments: derived from the bell rows
+  // because no per-viewer read state exists on pa_task_comments.
+  const comments = useUnreadComments()
   const [openMeeting, setOpenMeeting] = useState<Meeting | null>(null)
   /* Creating a task is the action this screen is missing, and it was the one thing
      the primary button did NOT do — "Ask Oscar" opened a voice call, which is a
@@ -71,6 +74,7 @@ export function TodayScreen() {
   [m.data])
 
   const nextUp = timeline.find(x => !x.is_overdue) ?? timeline[0]
+  const nextDue = nextUp?.due_at ? parseIstNaive(nextUp.due_at) : null
   const overdueCount = timeline.filter(x => x.is_overdue).length
 
   if (t.loading && !t.data) {
@@ -90,18 +94,30 @@ export function TodayScreen() {
         <div className="p-5 sm:p-6">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[.12em]"
-                   style={{ color: 'var(--text-subtle)' }}>
-                <Sun className="size-3.5" /> {greeting()}
-              </div>
-              <h2 className="mt-1.5 text-[22px] font-semibold tracking-tight sm:text-2xl">
-                {user?.name?.split(' ')[0] ?? 'Hello'}
-              </h2>
-              {/* One sentence, in plain words, about the actual state of the day.
-                  This is the whole screen in a line — everything below is detail. */}
-              <p className="mt-2 max-w-lg text-sm leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-                {brief(timeline.length, overdueCount, todaysMeetings.length, done.length, nextUp)}
+              {/* 🔴 NO GREETING AND NO NAME. The shell header above already says
+                  "Today · What needs you right now", so a "Good morning, Sathvik"
+                  underneath it spent the largest type on the screen restating the
+                  page and telling you your own name. The state of the day gets that
+                  type instead — this is a console, not a personal dashboard. */}
+              <p className="text-[19px] font-semibold leading-snug tracking-tight sm:text-[21px]">
+                {headline(timeline.length, overdueCount, todaysMeetings.length, done.length)}
               </p>
+              {/* Next up is the ONE actionable fact, so it gets its own line and its
+                  time sits under the title rather than trailing it in prose — a time
+                  buried mid-sentence has to be read, where this can be glanced at. */}
+              {nextUp && (
+                <p className="mt-2 max-w-lg text-sm leading-relaxed"
+                   style={{ color: 'var(--text-muted)' }}>
+                  <span style={{ color: 'var(--text-subtle)' }}>Next up: </span>
+                  <span style={{ color: 'var(--text)' }}>{nextUp.title}</span>
+                  {nextDue && (
+                    <>
+                      <br />
+                      <span className="tabular-nums">{dueLabel(nextDue)}</span>
+                    </>
+                  )}
+                </p>
+              )}
             </div>
             <div className="hidden shrink-0 sm:block">
               <Button variant="primary" onClick={() => setCreating(true)}>
@@ -170,7 +186,8 @@ export function TodayScreen() {
                 key={task.id} task={task}
                 busy={busyId === task.id}
                 onToggle={() => void toggle(task)}
-                onOpen={() => setOpenTask(task)}
+                onOpen={() => { comments.markSeen(task.id); setOpenTask(task) }}
+                        unreadComments={comments.byItem.get(task.id)}
                 showAssignee
               />
             ))}
@@ -181,14 +198,15 @@ export function TodayScreen() {
       {/* ── what got done ────────────────────────────────────────────── */}
       {done.length > 0 && (
         <section>
-          <SectionHeading count={done.length}>Finished today</SectionHeading>
+          <SectionHeading count={done.length}>Completed today</SectionHeading>
           <div className="space-y-2">
             {done.map(task => (
               <TaskCard
                 key={task.id} task={task}
                 busy={busyId === task.id}
                 onToggle={() => void toggle(task)}
-                onOpen={() => setOpenTask(task)}
+                onOpen={() => { comments.markSeen(task.id); setOpenTask(task) }}
+                        unreadComments={comments.byItem.get(task.id)}
               />
             ))}
           </div>
@@ -266,23 +284,14 @@ function MeetingRow({ meeting, onOpen }: { meeting: Meeting; onOpen: () => void 
   )
 }
 
-function greeting(): string {
-  // Hour in IST, not the browser's — the backend's whole world is IST, and a
-  // "Good morning" that disagrees with the timestamps beside it is worse than none.
-  const h = Number(new Intl.DateTimeFormat('en-GB',
-    { hour: 'numeric', hour12: false, timeZone: 'Asia/Kolkata' }).format(new Date()))
-  if (h < 5) return 'Late night'
-  if (h < 12) return 'Good morning'
-  if (h < 17) return 'Good afternoon'
-  if (h < 21) return 'Good evening'
-  return 'Good evening'
-}
-
-/** The one-sentence brief. Written to be true in every branch, including the two
- *  that look the same and are not: nothing due because you finished it, and nothing
- *  due because nothing was planned. */
-function brief(open: number, overdue: number, meets: number, done: number,
-               next: Task | undefined): string {
+/** The state of the day in one clause. Written to be true in every branch,
+ *  including the two that look the same and are not: nothing due because you
+ *  finished it, and nothing due because nothing was planned.
+ *
+ *  Next-up used to be appended here as a second sentence. It moved into the JSX so
+ *  the title and its time can be styled and put on separate lines — a function that
+ *  returns a string can only ever produce prose. */
+function headline(open: number, overdue: number, meets: number, done: number): string {
   const parts: string[] = []
 
   if (overdue > 0) {
@@ -301,14 +310,10 @@ function brief(open: number, overdue: number, meets: number, done: number,
 
   if (parts.length === 0) {
     return done > 0
-      ? `Everything due today is done — ${done} ${done === 1 ? 'task' : 'tasks'} cleared.`
-      : 'Nothing is due today. A good moment to plan ahead.'
+      ? `Everything due today is done — ${done} ${done === 1 ? 'task' : 'tasks'} cleared`
+      : 'Nothing is due today'
   }
 
   const head = parts.join(', ').replace(/, ([^,]*)$/, ' and $1')
-  const due = next?.due_at ? parseIstNaive(next.due_at) : null
-  const tail = next
-    ? ` Next up: ${next.title}${due ? ` at ${dueLabel(due)}` : ''}.`
-    : ''
-  return `${head[0].toUpperCase()}${head.slice(1)}.${tail}`
+  return `${head[0].toUpperCase()}${head.slice(1)}`
 }

@@ -4,12 +4,16 @@ import { team as teamApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
 import { getUser } from '../../lib/session'
-import { messageTime } from '../../lib/format'
+import {
+  dayLabel, isPast, isToday, isTomorrow, istDateKey, messageTime, parseIstNaive,
+} from '../../lib/format'
 import { resolvePresence, usePresence } from '../../lib/presence'
 import type { Task } from '../../lib/types'
 import { Avatar } from '../../shell/AppShell'
+import { byDueAsc } from '../tasks/buckets'
 import { TaskCard } from '../tasks/TaskCard'
 import { TaskDetail } from '../tasks/TaskDetail'
+import { useUnreadComments } from '../tasks/useUnreadComments'
 import {
   Card, EmptyState, ErrorState, SectionHeading, Skeleton, cx,
 } from '../../ui'
@@ -30,8 +34,20 @@ import {
 export function TeamScreen() {
   const me = getUser()
   const teamId = me?.team_id
-  const [selected, setSelected] = useState<number | null>(null)
+  /**
+   * Opens on YOU, not on the whole workspace.
+   *
+   * `null` means the workspace, and that was the default — but landing on 300 project
+   * tasks belonging to six people answers a question you did not ask yet. Your own
+   * team work is the thing you came to check; the workspace card is one tap away and
+   * so is everyone else.
+   */
+  const [selected, setSelected] = useState<number | null>(() => getUser()?.id ?? null)
   const [openTask, setOpenTask] = useState<Task | null>(null)
+  // Unread comments per task — the badge and the glow on each card, and the
+  // clear when one is opened. See useUnreadComments: derived from the bell rows
+  // because no per-viewer read state exists on pa_task_comments.
+  const comments = useUnreadComments()
 
   const members = useApi(
     s => teamId ? teamApi.members(teamId, s) : Promise.resolve([]), [teamId])
@@ -63,9 +79,94 @@ export function TeamScreen() {
       .sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name)),
     [members.data, live])
 
-  const shown = selected ? (memberTasks.data?.tasks ?? []) : (projects.data?.tasks ?? [])
+  /**
+   * 🔴 SORTED. This list was rendered in whatever order the API returned, which is
+   * id order — so a team's projects came out by when they were created and looked
+   * shuffled. It was the last list in the app still doing that; Today, Tasks and the
+   * calendar all order their rows.
+   *
+   * Open work first, by due date, using the SAME comparator as everywhere else
+   * (byDueAsc from buckets.ts — it already handles undated tasks and breaks ties on
+   * id so the list does not reshuffle on every refetch). Finished work sinks to the
+   * bottom: on a team view the question is what is still outstanding, and a completed
+   * task sitting between two live ones answers a question nobody asked.
+   */
+  const shown = useMemo(() => {
+    const raw = selected ? (memberTasks.data?.tasks ?? []) : (projects.data?.tasks ?? [])
+    const closed = (t: Task) => t.status === 'completed' || t.status === 'cancelled'
+    return [...raw].sort((a, b) =>
+      Number(closed(a)) - Number(closed(b)) || byDueAsc(a, b))
+  }, [selected, memberTasks.data, projects.data])
   const activeShown = shown.filter(t => t.status !== 'cancelled')
+
+  /**
+   * Grouped by DUE DAY, with the day named.
+   *
+   * A flat list gives no sense of when anything lands — and this workspace really has
+   * 300 project tasks. Dated headings turn it into "what is on today, what is
+   * tomorrow, what has slipped".
+   *
+   * Five headings, in the order they matter:
+   *   Overdue          past its time and still open — first, always
+   *   Today / Tomorrow
+   *   a named day      "Mon 25 Aug"
+   *   No date          undated work, late: it cannot be late
+   *   Done             finished work, last of all
+   *
+   * Keyed on istDateKey, the IST calendar day, so a task at 23:30 stays on its own
+   * date instead of being pushed into the next one by the browser's offset.
+   */
+  const groups = useMemo(() => {
+    const isClosed = (t: Task) => t.status === 'completed' || t.status === 'cancelled'
+    const out: { key: string; label: string; rank: number; tasks: Task[] }[] = []
+    const find = (key: string, label: string, rank: number) => {
+      let g = out.find(x => x.key === key)
+      if (!g) { g = { key, label, rank, tasks: [] }; out.push(g) }
+      return g
+    }
+    for (const t of activeShown) {
+      const due = parseIstNaive(t.due_at)
+      if (isClosed(t)) {
+        // 🔴 FINISHED WORK IS GROUPED BY DAY TOO, not piled into one bucket. As a
+        // single group it was 83 tasks spanning weeks, and because the list is sorted
+        // by full datetime the visible times cycled — 08:00, 20:11, 08:00, 12:00 —
+        // which reads as unsorted even though it is not.
+        const key = due ? `done-${istDateKey(due)}` : 'done-none'
+        const label = !due ? 'Done · no date'
+          : isToday(due) ? 'Done today'
+          : `Done · ${dayLabel(due)}`
+        find(key, label, 4).tasks.push(t)
+      }
+      else if (!due)            find('none', 'No date', 3).tasks.push(t)
+      else if (isPast(due) && !isToday(due))
+                                find('overdue', 'Overdue', 0).tasks.push(t)
+      else if (isToday(due))    find('today', 'Today', 1).tasks.push(t)
+      else if (isTomorrow(due)) find('tomorrow', 'Tomorrow', 1).tasks.push(t)
+      else                      find(istDateKey(due), dayLabel(due), 2).tasks.push(t)
+    }
+    /**
+     * Rank first, then the day — but the day sorts in OPPOSITE directions either side
+     * of the split, because "next" and "latest" are different questions:
+     *
+     *   open work (ranks 0-2)   ASCENDING  — soonest first, what needs doing next
+     *   finished work (rank 4)  DESCENDING — most recent day first, what just landed
+     *
+     * Times inside every group stay ascending, from the byDueAsc sort upstream.
+     */
+    return out.sort((a, b) => {
+      if (a.rank !== b.rank) return a.rank - b.rank
+      if (a.rank === 4) return b.key.localeCompare(a.key)      // newest day on top
+      if (a.key === 'today') return -1
+      if (b.key === 'today') return 1
+      return a.key.localeCompare(b.key)
+    })
+  }, [activeShown])
   const selectedMember = roster.find(m => m.user_id === selected)
+  /** "Your tasks", not "Sathvik's tasks" — reading your own name back at you in a
+   *  heading is the same noise as "To: you" on your own task card. */
+  const headingName = selectedMember
+    ? (selectedMember.user_id === me?.id ? 'Your' : `${selectedMember.name}'s`)
+    : null
 
   if (!teamId) {
     return (
@@ -88,6 +189,36 @@ export function TeamScreen() {
         {members.error && <ErrorState error={members.error} onRetry={members.reload} />}
 
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {/* 🔴 THE WORKSPACE IS A CARD IN THE ROSTER, and it is selected by default.
+              `selected === null` already meant "the whole workspace" — that was the
+              default all along — but nothing on screen SAID so: every member card sat
+              unselected and the heading below just changed wording. A default with no
+              visible state reads as nothing being selected.
+              First in the grid, so the reading order is "the team, then the people in
+              it", and tapping it is the way back from a member without hunting for a
+              clear button. */}
+          <button
+            onClick={() => setSelected(null)}
+            aria-pressed={selected === null}
+            className="flex items-center gap-3 rounded-[var(--radius-card)] border p-3 text-left transition"
+            style={selected === null
+              ? { background: 'var(--accent-soft)', borderColor: 'var(--accent)' }
+              : { background: 'var(--bg-elevated)', borderColor: 'var(--border)' }}
+          >
+            <div className="grid size-[34px] shrink-0 place-items-center rounded-full"
+                 style={{ background: 'var(--accent)', color: '#fff' }}>
+              <Users className="size-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[13.5px] font-medium">
+                {me.team_name ?? 'Workspace'}
+              </div>
+              <div className="truncate text-[11.5px]" style={{ color: 'var(--text-subtle)' }}>
+                Everyone's project tasks
+              </div>
+            </div>
+          </button>
+
           {roster.map(m => {
             const isSel = selected === m.user_id
             return (
@@ -117,7 +248,7 @@ export function TeamScreen() {
                   <div className="truncate text-[11px]" style={{ color: 'var(--text-subtle)' }}>
                     {m.online
                       ? 'Online'
-                      : m.last_seen ? `Last seen ${messageTime(m.last_seen)}`
+                      : m.last_seen ? `Last seen ${messageTime(m.last_seen, 'utc')}`
                       : m.role === 'team_lead' ? 'Lead' : 'Offline'}
                   </div>
                 </div>
@@ -130,7 +261,8 @@ export function TeamScreen() {
       {/* ── tasks ────────────────────────────────────────────────────── */}
       <section>
         <SectionHeading count={activeShown.length}>
-          {selectedMember ? `${selectedMember.name}'s tasks` : 'Team projects'}
+          {headingName ? `${headingName} tasks`
+            : `${me.team_name ?? 'Workspace'} · project tasks`}
         </SectionHeading>
 
         {(projects.loading || memberTasks.loading) && <Skeleton rows={3} />}
@@ -144,7 +276,10 @@ export function TeamScreen() {
         {!projects.loading && !memberTasks.loading && activeShown.length === 0 && (
           <Card>
             <EmptyState
-              title={selectedMember ? `${selectedMember.name} has nothing open` : 'No team projects'}
+              title={headingName
+                ? (headingName === 'Your' ? 'You have nothing open'
+                   : `${selectedMember?.name} has nothing open`)
+                : 'No team projects'}
               body={selectedMember
                 ? 'Tasks assigned to them will show here.'
                 : 'Project tasks shared across the workspace appear here.'}
@@ -152,16 +287,34 @@ export function TeamScreen() {
           </Card>
         )}
 
-        <div className="space-y-2">
-          {activeShown.map(t => (
-            <TaskCard key={t.id} task={t}
-                      // Read-only from here: completing somebody else's task from a
-                      // roster view is almost always a mis-tap, and it notifies them.
-                      onToggle={() => setOpenTask(t)}
-                      onOpen={() => setOpenTask(t)}
-                      showAssignee />
-          ))}
-        </div>
+        {groups.map(g => (
+          <div key={g.key} className="mb-5">
+            {/* The day, then how many land on it. Overdue is the only heading that is
+                a problem rather than a fact, so it is the only one coloured. */}
+            <div className="mb-2 flex items-center gap-2 px-1">
+              <span className="text-[12px] font-semibold uppercase tracking-[.08em]"
+                    style={{ color: g.key === 'overdue' ? '#DC2626' : 'var(--text-muted)' }}>
+                {g.label}
+              </span>
+              <span className="rounded-full px-1.5 py-px text-[11px] font-semibold tabular-nums"
+                    style={{ background: 'var(--bg-sunken)', color: 'var(--text-subtle)' }}>
+                {g.tasks.length}
+              </span>
+            </div>
+            <div className="space-y-2">
+              {g.tasks.map(t => (
+                <TaskCard key={t.id} task={t}
+                          // Read-only from here: completing somebody else's task from
+                          // a roster view is almost always a mis-tap, and it notifies
+                          // them.
+                          onToggle={() => setOpenTask(t)}
+                          onOpen={() => { comments.markSeen(t.id); setOpenTask(t) }}
+                        unreadComments={comments.byItem.get(t.id)}
+                          showAssignee />
+              ))}
+            </div>
+          </div>
+        ))}
       </section>
 
       {openTask && (

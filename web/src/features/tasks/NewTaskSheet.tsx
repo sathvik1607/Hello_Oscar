@@ -62,6 +62,13 @@ export function NewTaskSheet({ onClose, onCreated, task }: {
     if (roster.length) return roster
     return task?.assigned_to_user_id ? [task.assigned_to_user_id] : []
   })
+  /**
+   * Project task (default) vs personal — the same switch the Flutter sheet has, and
+   * the web form simply never sent the field, so every task created here was a
+   * PROJECT task whether you wanted it or not. `is_project=0` hides it from
+   * `GET /teams/{id}/tasks?project=true`, which is My Team.
+   */
+  const [isProject, setIsProject] = useState(task?.is_project !== 0 && task?.is_project !== false)
   const [title, setTitle] = useState(task?.title ?? '')
   const [date, setDate] = useState(seededDate ?? istDateKey(istNow()))
   const [time, setTime] = useState(seededTime ?? defaultTime())
@@ -111,6 +118,11 @@ export function NewTaskSheet({ onClose, onCreated, task }: {
           // Omitted when empty so the backend's own self-assign default applies,
           // rather than this client deciding what "nobody" means.
           ...(assignees.length ? { assigned_to_user_ids: assignees } : {}),
+          // 🔴 DELEGATED ⇒ ALWAYS A PROJECT TASK, mirroring the Flutter sheet
+          // (`_assigneeId == null ? _isProject : true`). Handing work to a teammate is
+          // team work by definition, and a personal task assigned to someone else
+          // would be invisible to the lead who has to track it.
+          is_project: assignees.length ? true : isProject,
         })
       }
       onCreated()
@@ -211,6 +223,31 @@ export function NewTaskSheet({ onClose, onCreated, task }: {
               )}
             </div>
           </Field>
+
+          {/* Hidden once the task is delegated — the choice is irrelevant there, and
+              offering a switch that cannot change the outcome is worse than none.
+              Flutter hides it on the same condition. */}
+          {assignees.length === 0 && (
+            <button type="button" onClick={() => setIsProject(v => !v)}
+                    className="flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition"
+                    style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[13.5px] font-medium">
+                  {isProject ? 'Project task' : 'Personal task'}
+                </span>
+                <span className="block text-[12px]" style={{ color: 'var(--text-subtle)' }}>
+                  {isProject ? 'Shared with your team' : 'Only for you'}
+                </span>
+              </span>
+              {/* A switch, not a checkbox: it is two named states, not an option you
+                  tick. Same reading as the mobile SwitchListTile. */}
+              <span className="relative h-[22px] w-[38px] shrink-0 rounded-full transition"
+                    style={{ background: isProject ? 'var(--accent)' : 'var(--border-strong)' }}>
+                <span className="absolute top-[3px] size-4 rounded-full bg-white transition-all"
+                      style={{ left: isProject ? '19px' : '3px' }} />
+              </span>
+            </button>
+          )}
 
           <Field label="Description">
             <textarea value={description} onChange={e => setDescription(e.target.value)}

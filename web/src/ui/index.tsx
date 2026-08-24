@@ -24,8 +24,15 @@ export function Card({ children, className, as: As = 'div', ...rest }: {
   return (
     <As
       className={cx('rounded-[var(--radius-card)] border', className)}
-      style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border)' }}
       {...rest}
+      /* 🔴 AFTER {...rest}, and MERGED. With `style` inside rest and spread last, any
+         caller passing a style silently replaced this whole object — losing the
+         background and the border colour, so the card rendered as a bare rectangle.
+         Hit for real by the unread-comment ring on TaskCard. Defaults first, caller's
+         keys second, so a caller can still override one property without dropping the
+         other two. */
+      style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border)',
+               ...rest.style }}
     >{children}</As>
   )
 }
