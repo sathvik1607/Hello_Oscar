@@ -21,16 +21,38 @@ export type NavItem = {
   primary?: boolean
 }
 
+/**
+ * Ordered by how often it is reached for, not by feature grouping. Three bands,
+ * and the bands are the point:
+ *
+ *   daily        Today, Chat, Tasks, Calendar
+ *   collaborate  Messages, My Team
+ *   occasional   Notes, Activity, then configuration last
+ *
+ * CHAT SITS SECOND because it is the product — "ask, and it acts" — and it was
+ * buried below two screens that mostly READ the data Chat can change.
+ *
+ * PERSONALIZE MOVED DOWN next to Settings. It teaches Oscar how you work: heavily
+ * used for a day, then almost never, so it was occupying a slot near the top for
+ * the rest of the account's life.
+ *
+ * ACTIVITY SITS LOW ON PURPOSE — the header already carries a bell with an unread
+ * dot, so the nav entry is the second way to reach it, not the first.
+ *
+ * ⚠️ `primary` is the MOBILE BOTTOM BAR, so this list controls two navigations at
+ * once. The same four items stay primary; only their order changes, which is why
+ * Chat moving up is a deliberate call and not a side effect.
+ */
 export const NAV: NavItem[] = [
   { id: 'today',         label: 'Today',    icon: Home,           primary: true },
+  { id: 'chat',          label: 'Chat',     icon: MessagesSquare, primary: true },
   { id: 'tasks',         label: 'Tasks',    icon: CheckSquare,    primary: true },
   { id: 'calendar',      label: 'Calendar', icon: CalendarDays,   primary: true },
-  { id: 'chat',          label: 'Chat',     icon: MessagesSquare, primary: true },
-  { id: 'notes',         label: 'Notes',    icon: NotebookPen },
-  { id: 'personalize',   label: 'Personalize', icon: Sparkles },
   { id: 'messages',      label: 'Messages', icon: MessageSquare, needsTeam: true },
   { id: 'team',          label: 'My Team',  icon: Users, needsTeam: true },
+  { id: 'notes',         label: 'Notes',    icon: NotebookPen },
   { id: 'notifications', label: 'Activity', icon: Bell },
+  { id: 'personalize',   label: 'Personalize', icon: Sparkles },
   { id: 'settings',      label: 'Settings', icon: Cog },
 ]
 
