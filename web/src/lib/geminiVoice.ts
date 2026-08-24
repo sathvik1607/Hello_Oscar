@@ -60,6 +60,7 @@
 
 import { PcmPlayer } from './pcmPlayer'
 import { getBase, getToken, getUser, getWsBase } from './session'
+import { GEMINI_VOICES } from './speakers'
 import { wakeStrip } from './wakeWord'
 import type { Handlers, Phase } from './liveVoice'
 
@@ -113,9 +114,8 @@ function b64(samples: Int16Array): string {
  *  rejected mid-setup — which surfaces as "voice is broken" rather than as a bad
  *  parameter. So the stored preference is mapped, and anything unrecognised falls
  *  back rather than being forwarded. */
-const GEMINI_VOICES = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Aoede', 'Leda', 'Orus', 'Zephyr']
 function toGeminiVoice(speaker: string | undefined): string {
-  if (speaker && GEMINI_VOICES.includes(speaker)) return speaker
+  if (speaker && (GEMINI_VOICES as readonly string[]).includes(speaker)) return speaker
   return (import.meta.env.VITE_GEMINI_VOICE as string) || 'Puck'
 }
 
