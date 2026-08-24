@@ -51,12 +51,33 @@ export function applyPick(text: string, caret: number, name: string): {
   return { text: next, caret: at + inserted.length }
 }
 
+/** The whole-channel entry, offered by the picker like any other row.
+ *
+ *  A pseudo-member rather than a separate type, so the component needs no special
+ *  case: picking it inserts the literal text "@everyone", and `resolve()` reads that
+ *  text back into `mention_all`. The TEXT stays the source of truth, which is the
+ *  same reason ids are resolved at send time rather than tracked while typing.
+ *
+ *  user_id -1 mirrors the backend's own ALL_MEMBERS_ID sentinel. It is never sent as
+ *  an id — `resolve()` returns `mentions: []` whenever mention_all is set, because
+ *  listing everyone individually would send some members two pushes for one message.
+ */
+export const EVERYONE: TeamMember = {
+  user_id: -1, name: 'everyone', role: '', is_active: 1,
+  joined_at: null, online: false, last_seen: null,
+} as TeamMember
+
 export function matches(members: TeamMember[], query: string, meId: number): TeamMember[] {
   const q = query.toLowerCase()
-  return members
+  // 🔴 Offered by the PICKER, not just understood on send. mention_all was
+  // implemented and recognised from the text, but nothing suggested it — so typing
+  // "@e" showed an empty list and the feature looked broken unless you already knew
+  // the exact word. A capability nobody can discover is not a capability.
+  const all = ALL_TOKENS.some(t => t.startsWith(q)) ? [EVERYONE] : []
+  return [...all, ...members
     // Mentioning yourself is never useful and it would push your own phone.
     .filter(m => m.user_id !== meId && m.is_active)
-    .filter(m => !q || m.name.toLowerCase().includes(q))
+    .filter(m => !q || m.name.toLowerCase().includes(q))]
     .slice(0, 6)      // a picker taller than the composer is worse than scrolling
 }
 
