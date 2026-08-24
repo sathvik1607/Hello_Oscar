@@ -135,6 +135,23 @@ export function VoiceOverlay() {
       if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return
       if (e.key === 'Escape') v.closeVoice()
       if (e.code === 'Space') { e.preventDefault(); onOrbTap() }
+      /**
+       * Shift E — HANG UP. Esc only hides the view, and in ambient mode the call
+       * carries on behind it, so there was no keyboard route to actually stopping
+       * one: the End call button was the only way.
+       *
+       * 🔴 Shift+Esc was the obvious pick and is CHROME'S TASK MANAGER on Windows
+       * and Linux; Cmd/Ctrl+Esc is taken by the OS. A single letter with Shift is
+       * free everywhere, and the text-input guard above already stops it firing
+       * while you type in the panel's comment box.
+       *
+       * Guarded on `v.running` so it cannot fire on an idle overlay, where it would
+       * do nothing and read as a dead shortcut.
+       */
+      if (e.shiftKey && e.code === 'KeyE' && v.running) {
+        e.preventDefault()
+        v.end()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -287,8 +304,19 @@ export function VoiceOverlay() {
           <p className="mx-auto mt-2 flex flex-wrap items-center justify-center gap-x-3
                         gap-y-1 text-[11px]"
              style={{ color: 'var(--text-subtle)' }}>
-            <span><Kbd>Space</Kbd> start or interrupt</span>
+            {/* 🔴 SAYS WHAT SPACE ACTUALLY DOES *RIGHT NOW*. It claimed "start or
+                interrupt" for the whole call, but onOrbTap only acts in two states:
+                it interrupts while Oscar is SPEAKING, and starts a call when there
+                is none. While listening — most of a call — and while a tool runs, it
+                does nothing, so a fixed label made a working key read as broken. */}
+            <span>
+              <Kbd>Space</Kbd>{' '}
+              {v.speaking ? 'interrupt' : !v.running ? 'start' : 'nothing to interrupt yet'}
+            </span>
             <span><Kbd>Esc</Kbd> close</span>
+            {/* Shown only while a call is live — a hang-up hint on an idle screen is
+                advertising a key that does nothing. */}
+            {v.running && <span><Kbd>Shift E</Kbd> end call</span>}
             {/* One global shortcut shown, not both. VOICE_HOTKEY still works — it is
                 registered in hotkeys.ts and unchanged — but a four-chip hint row
                 reads as a keyboard reference rather than a nudge, and the
