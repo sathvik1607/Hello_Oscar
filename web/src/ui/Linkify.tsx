@@ -1,4 +1,6 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { Check, Copy, ExternalLink } from 'lucide-react'
 
 /**
  * Renders text with any URLs in it as real links.
@@ -44,6 +46,9 @@ function trimTrailing(url: string): { href: string; tail: string } {
 }
 
 export function Linkify({ text }: { text: string | null | undefined }) {
+  /** The open menu: which URL, and where the click landed. */
+  const [menu, setMenu] = useState<{ href: string; x: number; y: number } | null>(null)
+
   if (!text) return null
   const out: ReactNode[] = []
   let last = 0
@@ -53,10 +58,25 @@ export function Linkify({ text }: { text: string | null | undefined }) {
     if (m.index > last) out.push(text.slice(last, m.index))
     const { href, tail } = trimTrailing(m[0])
     out.push(
+      /**
+       * 🔴 STILL A REAL `<a href>` WITH `target="_blank"`, even though the click is
+       * intercepted. The element type is what gives you middle-click, ⌘-click, the
+       * browser's own "Open in new tab", the status bar preview on hover, and a
+       * copyable target for assistive tech. A `<span onClick>` would look identical
+       * and quietly take all of that away.
+       */
       <a key={`${m.index}-${href}`} href={href} target="_blank" rel="noopener noreferrer"
-         // stopPropagation because these sit inside cards and rows that are
-         // themselves clickable — opening a link must not also open the task.
-         onClick={e => e.stopPropagation()}
+         onClick={e => {
+           // stopPropagation because these sit inside cards and rows that are
+           // themselves clickable — acting on a link must not also open the task.
+           e.stopPropagation()
+           // Let the BROWSER handle its own gestures. ⌘/ctrl-click, shift-click and
+           // middle-click already mean "open it, elsewhere" — showing a menu asking
+           // what they meant would be second-guessing an explicit instruction.
+           if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return
+           e.preventDefault()
+           setMenu({ href, x: e.clientX, y: e.clientY })
+         }}
          className="underline decoration-1 underline-offset-2 hover:opacity-80"
          style={{ color: 'var(--accent)' }}>
         {href}
@@ -66,5 +86,117 @@ export function Linkify({ text }: { text: string | null | undefined }) {
     last = m.index + m[0].length
   }
   if (last < text.length) out.push(text.slice(last))
-  return <>{out}</>
+  return (
+    <>
+      {out}
+      {menu && <LinkMenu {...menu} onClose={() => setMenu(null)} />}
+    </>
+  )
+}
+
+/**
+ * Open-or-copy, at the point of the click.
+ *
+ * These URLs come from other people — a teammate's comment, a meeting note, one of
+ * Oscar's replies — and the two things you actually want are almost evenly split:
+ * join the call now, or paste the link somewhere else. A bare link forced the first
+ * and made the second a select-and-drag exercise inside a bubble that is itself a
+ * click target.
+ *
+ * `createPortal` to `document.body` rather than the shared `Portal` helper: that one
+ * locks body scroll for full-screen sheets, which is wrong for a two-item popover.
+ * A portal is still needed — chat bubbles and cards clip their overflow, so an
+ * absolutely-positioned menu would be cut off inside them.
+ */
+function LinkMenu({ href, x, y, onClose }: {
+  href: string; x: number; y: number; onClose: () => void
+}) {
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    // `capture`, so a click anywhere closes this before that element's own handler
+    // runs — otherwise dismissing the menu could also open the task behind it.
+    const onDown = () => onClose()
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('pointerdown', onDown, true)
+    // A menu pinned to viewport coordinates is in the wrong place the moment
+    // anything scrolls, so it closes rather than drifting.
+    window.addEventListener('scroll', onDown, true)
+    window.addEventListener('resize', onDown)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('pointerdown', onDown, true)
+      window.removeEventListener('scroll', onDown, true)
+      window.removeEventListener('resize', onDown)
+    }
+  }, [onClose])
+
+  const open = () => {
+    // noopener is not optional with _blank: without it the new page gets a live
+    // handle on this tab and can navigate it away — and these URLs are pasted in by
+    // other people, so they are untrusted input.
+    window.open(href, '_blank', 'noopener,noreferrer')
+    onClose()
+  }
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(href)
+    } catch {
+      // navigator.clipboard needs a secure context. localhost and https qualify, a
+      // plain-http origin does not — so there is a fallback rather than a silent
+      // no-op, because "I clicked Copy and nothing happened" is the worst outcome.
+      const ta = document.createElement('textarea')
+      ta.value = href
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      try { document.execCommand('copy') } catch { /* nothing left to try */ }
+      document.body.removeChild(ta)
+    }
+    setCopied(true)
+    // Confirmation stays visible briefly, THEN closes — a menu that vanishes the
+    // instant you click gives no evidence the copy happened.
+    setTimeout(onClose, 650)
+  }
+
+  // Clamped to the viewport so a link near the right or bottom edge does not open a
+  // menu half off-screen. The numbers are the menu's own approximate size.
+  const left = Math.min(x, Math.max(8, window.innerWidth - 268))
+  const top = Math.min(y + 8, Math.max(8, window.innerHeight - 116))
+
+  return createPortal(
+    <div role="menu" aria-label="Link actions"
+         className="fade fixed z-[95] w-[252px] overflow-hidden rounded-xl border shadow-xl"
+         style={{ left, top, background: 'var(--bg-elevated)', borderColor: 'var(--border)' }}
+         // The menu is inside the capture-phase dismiss listener above, so its own
+         // clicks have to be held back from it or it would close before acting.
+         onPointerDown={e => e.stopPropagation()}
+         onClick={e => e.stopPropagation()}>
+      {/* The URL itself, because a menu that does not say WHICH link it is about is
+          guesswork when a message contains two of them. */}
+      <div className="truncate border-b px-3 py-2 text-[11.5px]"
+           style={{ borderColor: 'var(--border)', color: 'var(--text-subtle)' }}
+           title={href}>
+        {href}
+      </div>
+      <button role="menuitem" onClick={open}
+              className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[13px]
+                         hover:bg-black/5 dark:hover:bg-white/10">
+        <ExternalLink className="size-4" style={{ color: 'var(--text-subtle)' }} />
+        Open in new tab
+      </button>
+      <button role="menuitem" onClick={() => void copy()}
+              className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[13px]
+                         hover:bg-black/5 dark:hover:bg-white/10">
+        {copied
+          ? <Check className="size-4" style={{ color: '#15803D' }} />
+          : <Copy className="size-4" style={{ color: 'var(--text-subtle)' }} />}
+        {copied ? 'Copied' : 'Copy link'}
+      </button>
+    </div>,
+    document.body,
+  )
 }
