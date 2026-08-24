@@ -20,3 +20,36 @@ export const SPEAKERS = [
 
 export const DEFAULT_SPEAKER =
   (import.meta.env.VITE_SARVAM_SPEAKER as string | undefined) ?? 'dev'
+
+
+/**
+ * Gemini Live voice names. 30 HD voices exist; these are the eight the relay
+ * accepts — it allowlists them because an unknown `voiceName` is rejected during
+ * setup and the session then produces SILENCE, the same quiet failure the removed
+ * bulbul v2 names caused above.
+ */
+export const GEMINI_VOICES = [
+  'Puck', 'Charon', 'Kore', 'Fenrir', 'Aoede', 'Leda', 'Orus', 'Zephyr',
+] as const
+
+/** Which engine is compiled in. Build-time: Vite inlines this and tree-shakes the
+ *  loser, so it cannot change at runtime. */
+export const VOICE_ENGINE =
+  (import.meta.env.VITE_VOICE_ENGINE as string) === 'sarvam' ? 'sarvam' : 'gemini'
+
+/**
+ * 🔴 The picker MUST follow the engine. With Gemini compiled in, the Sarvam list
+ * was still being offered — and `toGeminiVoice()` maps every unrecognised name to
+ * Puck, so all nine options did exactly the same thing. A control that appears to
+ * change something and does not is worse than no control.
+ */
+export const VOICE_OPTIONS: readonly string[] =
+  VOICE_ENGINE === 'sarvam' ? SPEAKERS : GEMINI_VOICES
+
+/** Describes the voices, never the vendor. Which speech provider is in use is an
+ *  implementation detail a user cannot act on, and naming it in Settings meant the
+ *  copy had to be re-edited every time the engine changed — and was wrong in
+ *  between. */
+export const VOICE_HINT = VOICE_ENGINE === 'sarvam'
+  ? 'The first five are male voices, the rest female.'
+  : 'Puck and Fenrir are warmer; Kore and Charon are flatter.'

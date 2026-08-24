@@ -2,7 +2,7 @@ import {
   createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo,
   useRef, useState,
 } from 'react'
-import type { LiveVoice, Phase } from '../../lib/liveVoice'
+import type { Phase } from '../../lib/liveVoice'
 import { DEFAULT_SPEAKER } from '../../lib/speakers'
 import { isSignedIn } from '../../lib/session'
 import { VOICE_HOTKEY, VOICE_TAP, useDoubleTap, useHotkey } from '../../lib/hotkeys'
@@ -48,6 +48,9 @@ export type VoiceState = {
   error: string | null
   running: boolean
   speaking: boolean
+  /** A tool is running this turn — lets the overlay say what it is doing instead
+   *  of guessing. */
+  working: boolean
   /** Set when the browser refused to play audio without a user gesture. Autoplay
    *  policy blocks sound until the page has been interacted with, so an ambient
    *  wake on a fresh load can be heard by us and not heard BY the user. */
@@ -87,9 +90,18 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   const [st, setSt] = useState<VoiceState>({
     phase: 'idle', level: 0, partial: '', heard: '', reply: '',
     error: null, running: false, speaking: false, needsGesture: false,
+    working: false,
   })
 
-  const engine = useRef<LiveVoice | null>(null)
+  /** Either engine. Structurally typed rather than tied to one class, because the
+   *  swap is the point: if a future engine satisfies this shape it drops in too. */
+  type Engine = {
+    readonly isRunning: boolean
+    start(): Promise<void>
+    stop(): void
+    interrupt(): void
+  }
+  const engine = useRef<Engine | null>(null)
   /** Guards against two concurrent starts. `start()` awaits a dynamic import, so a
    *  fast double-tap could otherwise get two engines — two microphones, two STT
    *  sockets, both billing. */
@@ -112,13 +124,36 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     // Imported on demand: the engine is ~1,000 lines of audio code and most page
     // loads never open a microphone. Ambient mode pays this on load, which is the
     // user's own choice rather than everyone's default.
-    const { LiveVoice } = await import('../../lib/liveVoice')
-    const lv = new LiveVoice({
-      onPhase: p => setSt(s => ({
-        ...s, phase: p, running: true,
-        speaking: p === 'speaking',
-        partial: p === 'listening' ? '' : s.partial,
-      })),
+    // 🔴 ENGINE CHOICE. Gemini by default; `VITE_VOICE_ENGINE=sarvam` restores the
+    // previous path. Both implement the same `Handlers` contract, so nothing below
+    // this line differs between them — which is also why switching back is an env
+    // var and a reload rather than a revert.
+    const useSarvam = (import.meta.env.VITE_VOICE_ENGINE as string) === 'sarvam'
+    const Engine = useSarvam
+      ? (await import('../../lib/liveVoice')).LiveVoice
+      : (await import('../../lib/geminiVoice')).GeminiVoice
+    const lv = new Engine({
+      onPhase: p => setSt(s => {
+        // 🔴 CLEAR THE SCREEN AT THE END OF A COMPLETED TURN. Returning to
+        // `listening` FROM `speaking` is the only reliable end-of-turn signal on
+        // the Gemini path: `turnComplete` means generation finished, while seconds
+        // of audio can still be queued, so the buffer draining is the honest end.
+        //
+        // Only from `speaking`, so the clear never fires on the initial listening
+        // state. An INTERRUPTED reply also lands here — the provider cannot tell a
+        // finished reply from an interrupted one, since both are speaking →
+        // listening — and that is acceptable: interrupting means moving on, so a
+        // cleared screen is what the user is asking for either way.
+        const turnEnded = p === 'listening' && s.phase === 'speaking'
+        return {
+          ...s, phase: p, running: true,
+          speaking: p === 'speaking',
+          partial: p === 'listening' ? '' : s.partial,
+          heard: turnEnded ? '' : s.heard,
+          reply: turnEnded ? '' : s.reply,
+        }
+      }),
+      onTool: running => setSt(s => ({ ...s, working: running })),
       onLevel: level => setSt(s => (
         // Only while listening: the orb is the only consumer, and updating state
         // ~10×/second through a whole reply re-renders the app for nothing.

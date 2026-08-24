@@ -1,0 +1,112 @@
+<!doctype html>
+<!--
+  Gemini Live POC — a SEPARATE Vite entry point, reached at /poc-gemini.html.
+
+  Why a standalone page rather than a route in App.tsx: isolation that can be
+  verified rather than asserted. This file is not referenced by index.html, not in
+  `build.rollupOptions.input`, and imports nothing from src/features or src/lib —
+  so it cannot reach the app's session store, socket singleton or voice engine,
+  and `npm run build` does not emit it. The app is unaffected whether this page
+  works or not.
+
+  It is served by `npm run dev` because Vite serves any HTML file in the project
+  root. That is the whole deployment story: there isn't one.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gemini Live POC — mic → Gemini → speaker</title>
+    <style>
+      :root { color-scheme: light dark; --fg: #e7e9ee; --bg: #0f1115; --dim: #8b93a7;
+              --line: #262a35; --accent: #7aa2f7; }
+      * { box-sizing: border-box; }
+      body { margin: 0; font: 14px/1.5 ui-sans-serif, system-ui, sans-serif;
+             background: var(--bg); color: var(--fg); padding: 24px; }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      .sub { color: var(--dim); margin-bottom: 20px; font-size: 13px; }
+      .warn { border: 1px solid #4a3a1a; background: #201a0d; color: #e8c887;
+              padding: 10px 12px; border-radius: 8px; margin-bottom: 20px; font-size: 13px; }
+      .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+      input, select, button { font: inherit; padding: 7px 11px; border-radius: 7px;
+              border: 1px solid var(--line); background: #171a21; color: var(--fg); }
+      button { cursor: pointer; }
+      button:disabled { opacity: .4; cursor: default; }
+      button.primary { background: var(--accent); color: #0b0d12; border-color: var(--accent); font-weight: 600; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+      @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+      .panel { border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+      .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em;
+              color: var(--dim); margin: 0 0 10px; font-weight: 600; }
+      pre, #log { white-space: pre-wrap; word-break: break-word; font: 12px/1.55
+              ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0;
+              max-height: 340px; overflow: auto; }
+      .orb { width: 14px; height: 14px; border-radius: 50%; background: #3a4152; }
+      .orb.listening { background: #4ade80; } .orb.thinking { background: #fbbf24; }
+      .orb.speaking { background: var(--accent); } .orb.connecting { background: #a78bfa; }
+      .meter { height: 5px; background: #1c2029; border-radius: 3px; overflow: hidden; width: 160px; }
+      #level { height: 100%; width: 0; background: #4ade80; transition: width .08s; }
+      .turn { display: flex; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+      .lat { min-width: 74px; font: 600 12px ui-monospace, monospace; color: var(--accent); }
+      .heard { color: var(--fg); } .said { color: var(--dim); margin-top: 2px; }
+    </style>
+  </head>
+  <body>
+    <h1>Gemini Live — voice-to-voice POC</h1>
+    <div class="sub">
+      mic → Gemini Live → speaker. One socket. No Oscar agent, no LangGraph, no tools,
+      nothing persisted. The MODEL is chosen server-side by <code>GEMINI_LIVE_MODEL</code>
+      (default <code>gemini-3.1-flash-live-preview</code>, which measured ~1.2 s to first
+      audio versus 3–5 s on the 2.5 native-audio models) — the browser cannot pick it,
+      because a client that could choose the model could bill a pricier one to our key.
+    </div>
+
+    <div class="warn">
+      <strong>Experiment.</strong> The backend needs <code>ENABLE_GEMINI_LIVE=1</code> and
+      <code>GEMINI_API_KEY</code> set, or this page cannot connect. Use
+      <strong>headphones</strong> — the microphone stays open through the reply so that
+      barge-in works, and on laptop speakers Gemini can hear itself and interrupt its own
+      answer.
+      <br><br>
+      <strong>Tools:</strong> a <code>user_id</code> is required and the backend must run
+      with <code>GEMINI_LIVE_TOOLS=1</code>. Blank means Gemini can talk but cannot touch
+      the workspace — deliberately fail-closed, since every Oscar tool is scoped to a
+      user. <strong>Whatever id you enter acts for real</strong>: tasks are created,
+      notifications fire at that person's phone. The Log below prints every
+      <code>ask_oscar</code> round trip.
+    </div>
+
+    <div class="row">
+      <input id="secret" type="password" placeholder="ADMIN_SECRET" size="22" />
+      <input id="uid" type="text" placeholder="user_id (for tools)" size="15" value="7" />
+      <select id="voice">
+        <option>Puck</option><option>Charon</option><option>Kore</option>
+        <option>Fenrir</option><option>Aoede</option><option>Leda</option>
+        <option>Orus</option><option>Zephyr</option>
+      </select>
+      <button id="start" class="primary">Start</button>
+      <button id="stop" disabled>Stop</button>
+      <button id="interrupt">Interrupt (manual)</button>
+      <button id="copy">Copy metrics</button>
+      <span class="orb" id="orb"></span><span id="state">idle</span>
+      <span class="meter"><span id="level"></span></span>
+    </div>
+
+    <div class="grid">
+      <div class="panel">
+        <h2>Turns — latency · heard · said</h2>
+        <div id="turns"></div>
+      </div>
+      <div class="panel">
+        <h2>Metrics</h2>
+        <pre id="summary">start a session</pre>
+      </div>
+      <div class="panel" style="grid-column: 1 / -1">
+        <h2>Log</h2>
+        <div id="log"></div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/poc/pocMain.ts"></script>
+  </body>
+</html>

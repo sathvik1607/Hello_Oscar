@@ -384,11 +384,24 @@ export const messages = {
    *  Unwrapped here so callers get a ChatText; appending the envelope optimistically
    *  inserts a bubble with no id and no text, and the id is what dedupes it against
    *  the WebSocket echo that follows. */
-  sendTeam: async (teamId: number, text: string, reply_to_id?: number | null) => {
+  /** @mentions are group-chat only, and they are what turn a normal group push into
+   *  an "X mentioned you" push. The backend has always accepted `mentions` and
+   *  `mention_all`; this client simply never sent them, so every @ was plain text
+   *  that tagged nobody. */
+  sendTeam: async (teamId: number, text: string, reply_to_id?: number | null,
+                   mentions?: number[], mention_all?: boolean) => {
     const r = await request<{ ok: boolean; message: ChatText }>(
       `/teams/${teamId}/messages`, {
         method: 'POST',
-        body: { user_id: requireUserId(), text, ...(reply_to_id ? { reply_to_id } : {}) },
+        body: {
+          user_id: requireUserId(), text,
+          ...(reply_to_id ? { reply_to_id } : {}),
+          // Omitted rather than sent empty: the backend treats absent and empty
+          // the same, and a body that lists every optional key as null is harder
+          // to read in a log than one that carries only what happened.
+          ...(mentions?.length ? { mentions } : {}),
+          ...(mention_all ? { mention_all: true } : {}),
+        },
       })
     return r.message
   },

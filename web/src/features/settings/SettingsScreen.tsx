@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Check, Monitor, Moon, Sun, Wifi } from 'lucide-react'
-import { health } from '../../lib/api'
+import { Monitor, Moon, Sun, Wifi } from 'lucide-react'
 import {
-  DEFAULT_BASE, applyTheme, getBase, getTheme, getUser, setBase, signOut,
+  applyTheme, getTheme, getUser, signOut,
   type Theme,
 } from '../../lib/session'
-import { reset as resetSocket, watchConnection, type ConnState } from '../../lib/appSocket'
-import { SPEAKERS } from '../../lib/speakers'
+import { watchConnection, type ConnState } from '../../lib/appSocket'
+import { VOICE_HINT, VOICE_OPTIONS } from '../../lib/speakers'
 import { useVoice } from '../voice/VoiceProvider'
 import { VOICE_TAP_LABEL, VOICE_HOTKEY_LABEL } from '../../lib/hotkeys'
 import {
-  Badge, Button, Card, Confirmation, Field, SectionHeading, cx, inputCls, inputStyle,
+  Badge, Button, Card, Field, SectionHeading, inputCls, inputStyle,
 } from '../../ui'
 
 /**
@@ -25,11 +24,7 @@ import {
 export function SettingsScreen() {
   const user = getUser()
   const [theme, setTheme] = useState<Theme>(getTheme())
-  const [base, setBaseValue] = useState(getBase())
   const [conn, setConn] = useState<ConnState>('closed')
-  const [probe, setProbe] = useState<'idle' | 'checking' | 'ok' | 'fail'>('idle')
-  const [probeMsg, setProbeMsg] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
   // Voice settings live in the provider, so the picker and the ambient switch
   // affect the running engine rather than a second copy of the preference.
   const voice = useVoice()
@@ -41,34 +36,7 @@ export function SettingsScreen() {
     applyTheme(t)
   }, [])
 
-  const saveBase = useCallback(async () => {
-    const url = base.trim().replace(/\/+$/, '')
-    if (!url) return
-    setBase(url)
-    setBaseValue(url)
-    // The socket was opened against the OLD host; without a reset it stays there
-    // while every HTTP call goes somewhere else — the app then looks half-broken
-    // in a way nothing on screen explains.
-    resetSocket()
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2600)
-  }, [base])
 
-  const check = useCallback(async () => {
-    setProbe('checking'); setProbeMsg(null)
-    try {
-      const r = await health()
-      // /health is SHALLOW — no database check — so a green answer means the process
-      // is up, not that the app works. Said plainly rather than implied.
-      setProbe(r?.status === 'ok' ? 'ok' : 'fail')
-      setProbeMsg(r?.status === 'ok'
-        ? 'The server is up. (This check does not test the database.)'
-        : `Unexpected answer: ${JSON.stringify(r)}`)
-    } catch (e) {
-      setProbe('fail')
-      setProbeMsg((e as Error).message)
-    }
-  }, [])
 
   return (
     <div className="max-w-2xl space-y-7">
@@ -123,12 +91,15 @@ export function SettingsScreen() {
       <section>
         <SectionHeading>Voice</SectionHeading>
         <Card className="space-y-4 p-4">
-          <Field label="Oscar's voice"
-                 hint="Sarvam bulbul:v3. The first five are male voices, the rest female.">
-            <select value={voice.speaker}
+          <Field label="Oscar's voice" hint={VOICE_HINT}>
+            {/* A stored preference from the other engine would leave the select
+                showing nothing while the engine quietly used its own default, so
+                the effective value is shown instead of the raw stored one. */}
+            <select value={VOICE_OPTIONS.includes(voice.speaker)
+                             ? voice.speaker : VOICE_OPTIONS[0]}
                     onChange={e => voice.setSpeaker(e.target.value)}
                     className={inputCls} style={inputStyle}>
-              {SPEAKERS.map(s => <option key={s} value={s}>{s}</option>)}
+              {VOICE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </Field>
 
@@ -177,10 +148,10 @@ export function SettingsScreen() {
             </label>
           </div>
           <p className="text-xs leading-relaxed" style={{ color: 'var(--text-subtle)' }}>
-            Speech is relayed through the Oscar server, which holds the Sarvam
+            Speech is relayed through the Oscar server, which holds the voice
             credential — it never reaches this page. The microphone stays open only
-            while a voice call is on screen, and Oscar acts only on what is addressed
-            to it by name.
+            while a voice call is on screen, and Oscar acts only on what is
+            addressed to it by name.
           </p>
         </Card>
       </section>
@@ -203,39 +174,6 @@ export function SettingsScreen() {
             Streaming replies, reminders and live task updates all arrive over this.
             When it is down, Oscar falls back to a slower non-streaming reply.
           </p>
-
-          <Field label="Backend URL"
-                 hint={`Default: ${DEFAULT_BASE}. Changing this reconnects everything.`}>
-            <div className="flex gap-2">
-              <input value={base} onChange={e => setBaseValue(e.target.value)}
-                     spellCheck={false} className={inputCls} style={inputStyle} />
-              <Button onClick={() => void saveBase()}
-                      disabled={base.trim().replace(/\/+$/, '') === getBase()}>
-                Save
-              </Button>
-            </div>
-          </Field>
-          {saved && <Confirmation>Reconnected to {getBase()}</Confirmation>}
-
-          <div className="flex items-center gap-2.5">
-            <Button size="sm" loading={probe === 'checking'} onClick={() => void check()}>
-              Test connection
-            </Button>
-            {probe === 'ok' && (
-              <span className="flex items-center gap-1 text-[13px]" style={{ color: '#15803D' }}>
-                <Check className="size-3.5" /> Reachable
-              </span>
-            )}
-            {probe === 'fail' && (
-              <span className="text-[13px]" style={{ color: '#DC2626' }}>Unreachable</span>
-            )}
-          </div>
-          {probeMsg && (
-            <p className={cx('text-xs leading-relaxed')}
-               style={{ color: probe === 'fail' ? '#DC2626' : 'var(--text-subtle)' }}>
-              {probeMsg}
-            </p>
-          )}
         </Card>
       </section>
     </div>
