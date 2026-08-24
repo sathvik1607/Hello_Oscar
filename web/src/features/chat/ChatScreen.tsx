@@ -2,16 +2,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDown, Loader2, MessagesSquare, Plus, Send, Sparkles, Trash2,
 } from 'lucide-react'
-import { ApiError, assistant, chat as chatApi } from '../../lib/api'
+import { ApiError, assistant, chat as chatApi, team as teamApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { subscribe, watchConnection, type ConnState } from '../../lib/appSocket'
-import { messageTime } from '../../lib/format'
+import { messageTime, titleCaseName } from '../../lib/format'
+import { getUser } from '../../lib/session'
+import { activeQuery, applyPick } from '../messages/mentions'
+import { Avatar } from '../../shell/AppShell'
 import { InlineCards, OscarPanel } from './OscarPanel'
 import { matchReplyTasks } from './replyTasks'
 import { useSpokenTasks } from './useSpokenTasks'
 import { TaskDetail } from '../tasks/TaskDetail'
 import { useTaskActions } from '../tasks/useTaskActions'
-import type { Task } from '../../lib/types'
+import type { Task, TeamMember } from '../../lib/types'
 import {
   Button, Card, EmptyState, IconButton, Skeleton, cx, inputCls, inputStyle, Linkify} from '../../ui'
 
@@ -69,6 +72,58 @@ export function ChatScreen() {
   const [atBottom, setAtBottom] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [showSessions, setShowSessions] = useState(false)
+  /**
+   * @mention picker — the same one team chat has, wired into Oscar's composer.
+   *
+   * It was missing here, and `@` is REAL SYNTAX in this endpoint rather than
+   * decoration: prompt rule 23b routes "@name <text>" to `send_to_member`, its
+   * CRITICAL OVERRIDE turns "assign task @name …" into `create_task`, and 23c makes
+   * "@notifyall" a broadcast. So typing `@` here already changed which tool ran —
+   * you just had to spell the name exactly right from memory, and a misspelling
+   * silently became prose instead of a mention.
+   *
+   * 🔴 THE WHOLE-TEAM TOKEN IS `@notifyall`, NOT `@everyone`. Team chat's picker
+   * offers "@everyone" because the messages endpoint has a `mention_all` flag;
+   * Oscar has no such flag and rule 23c keys on the literal word "notifyall".
+   * Inserting "@everyone" here would produce a plausible-looking mention that
+   * broadcasts to nobody — which is why this builds its own candidate list rather
+   * than reusing `matches()`.
+   */
+  const [mentionQ, setMentionQ] = useState<string | null>(null)
+  const [mentionIdx, setMentionIdx] = useState(0)
+  const taRef = useRef<HTMLTextAreaElement>(null)
+  const me = getUser()
+  const roster = useApi(s2 => (me?.team_id ? teamApi.members(me.team_id, s2)
+                                          : Promise.resolve([] as TeamMember[])),
+                        [me?.team_id], 'members')
+
+  const picks = useMemo(() => {
+    if (mentionQ === null) return []
+    const q = mentionQ.toLowerCase()
+    const all = 'notifyall'.startsWith(q) || 'everyone'.startsWith(q) || 'all'.startsWith(q)
+      // A pseudo-row, so the list needs no special case. `user_id: -1` mirrors the
+      // backend's ALL_MEMBERS_ID sentinel and is never sent anywhere.
+      ? [{ user_id: -1, name: 'notifyall' } as TeamMember]
+      : []
+    return [...all, ...(roster.data ?? [])
+      // Mentioning yourself would ask Oscar to DM you your own message.
+      .filter(m => m.is_active && m.user_id !== me?.id)
+      .filter(m => !q || m.name.toLowerCase().includes(q))]
+      .slice(0, 6)
+  }, [mentionQ, roster.data, me?.id])
+
+  const pickMention = useCallback((m: TeamMember) => {
+    const ta = taRef.current
+    const caret = ta?.selectionStart ?? draft.length
+    const next = applyPick(draft, caret, m.name)
+    setDraft(next.text)
+    setMentionQ(null)
+    // Caret restored after the repaint — otherwise the browser drops it at the end
+    // and a mention typed mid-sentence throws the cursor away.
+    requestAnimationFrame(() => {
+      ta?.focus(); ta?.setSelectionRange(next.caret, next.caret)
+    })
+  }, [draft])
   /** The task open beside the conversation. Held here, not in the bubble, so only one
    *  is ever open and the pane survives new turns arriving above it. */
   const [openTask, setOpenTask] = useState<Task | null>(null)
@@ -418,11 +473,67 @@ export function ChatScreen() {
                 : 'Connecting to Oscar…'}
             </p>
           )}
+          {/* Above the composer, so it never covers the reply you are reading. */}
+          {picks.length > 0 && (
+            <div className="mb-1.5 overflow-hidden rounded-lg border"
+                 style={{ borderColor: 'var(--border)', background: 'var(--bg-elevated)' }}>
+              {picks.map((m, i) => (
+                <button key={m.user_id} type="button"
+                        // onMouseDown, not onClick — onClick fires after blur, and the
+                        // blur closes the picker before the pick registers.
+                        onMouseDown={e => { e.preventDefault(); pickMention(m) }}
+                        className={cx('flex w-full items-center gap-2 px-3 py-2 text-left text-[13px]',
+                                      i === mentionIdx && 'bg-black/5 dark:bg-white/10')}>
+                  {m.user_id === -1 ? (
+                    <>
+                      <span className="grid size-5 place-items-center rounded-full text-[10px] font-bold"
+                            style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>@</span>
+                      <span>notifyall</span>
+                      <span className="ml-auto text-[10.5px]" style={{ color: 'var(--text-subtle)' }}>
+                        the whole team
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Avatar name={m.name} size={20} />
+                      <span className="truncate">{titleCaseName(m.name)}</span>
+                    </>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="flex items-end gap-2">
             <textarea
+              ref={taRef}
               value={draft}
-              onChange={e => setDraft(e.target.value)}
+              onChange={e => {
+                setDraft(e.target.value)
+                setMentionQ(activeQuery(e.target.value, e.target.selectionStart ?? 0))
+                setMentionIdx(0)
+              }}
+              // Clicking elsewhere moves the caret, which changes which token is being
+              // typed — without this the picker keeps offering a query the cursor left.
+              onSelect={e => setMentionQ(
+                activeQuery(draft, (e.target as HTMLTextAreaElement).selectionStart ?? 0))}
+              onBlur={() => setMentionQ(null)}
               onKeyDown={e => {
+                if (picks.length > 0) {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault(); setMentionIdx(i => (i + 1) % picks.length); return
+                  }
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault()
+                    setMentionIdx(i => (i - 1 + picks.length) % picks.length); return
+                  }
+                  // Enter completes the name instead of sending. Sending a half-typed
+                  // mention is the exact mistake the picker exists to prevent — and
+                  // here it would silently change which TOOL runs.
+                  if (e.key === 'Enter' || e.key === 'Tab') {
+                    e.preventDefault(); pickMention(picks[mentionIdx]); return
+                  }
+                  if (e.key === 'Escape') { e.preventDefault(); setMentionQ(null); return }
+                }
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(draft) }
               }}
               rows={1}

@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ArrowLeft, Check, CheckCheck, Circle, Hash, MessageSquare, Reply, Send, X,
+  ArrowLeft, AtSign, Check, CheckCheck, Circle, Hash, MessageSquare, Reply, Send, X,
 } from 'lucide-react'
 import { ApiError, messages as msgApi, team as teamApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { getUser } from '../../lib/session'
 import { subscribe } from '../../lib/appSocket'
-import { lastSeenLabel, messageTime, titleCaseName } from '../../lib/format'
+import {
+  dayLabel, istDateKey, istNow, isToday, lastSeenLabel, messageTime, titleCaseName,
+} from '../../lib/format'
 import { resolvePresence, usePresence } from '../../lib/presence'
 import { usePeerTyping, useTypingSignal } from '../../lib/typing'
 import type { ChatText, TeamMember } from '../../lib/types'
@@ -38,10 +40,22 @@ import {
  */
 type Open = { kind: 'team'; teamId: number } | { kind: 'dm'; peerId: number } | null
 
-export function MessagesScreen() {
+export function MessagesScreen({ target }: {
+  /** Deep-link from Activity. `peer: true` means `id` is a USER id, not an item id —
+   *  a DM notification carries no item, so the peer is resolved from the message text
+   *  before it gets here (see NotificationsScreen.dmPeerFrom). */
+  target?: { id: number; thread?: boolean; peer?: boolean } | null
+} = {}) {
   const me = getUser()
   const teamId = me?.team_id ?? null
   const [open, setOpen] = useState<Open>(null)
+
+  /* Opens the thread the notification was about. Guarded on `peer` so an item-id
+     target — which can never mean a person — cannot open a conversation with
+     whichever user happens to share that number. */
+  useEffect(() => {
+    if (target?.peer && target.id > 0) setOpen({ kind: 'dm', peerId: target.id })
+  }, [target?.peer, target?.id])
 
   const live = usePresence()
   const convos = useApi(s => msgApi.conversations(s), [], 'conversations')
@@ -144,6 +158,21 @@ export function MessagesScreen() {
     <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
       {/* ── list ─────────────────────────────────────────────────────── */}
       <Card className={cx('overflow-hidden p-1.5', open && 'hidden lg:block')}>
+        {/* A header, and NO "+" beside it. Every active teammate is already a row
+            below — there is nobody a plus could add, and adding a real person is
+            `POST /auth/join-team` with an invite code, which lives in Settings. A
+            button that opens nothing is worse than no button. */}
+        <div className="flex items-center gap-2 px-3 pb-2 pt-2.5">
+          <h2 className="text-[11px] font-semibold uppercase tracking-[.1em]"
+              style={{ color: 'var(--text-subtle)' }}>
+            Conversations
+          </h2>
+          <span className="rounded-full px-1.5 py-px text-[10.5px] font-semibold tabular-nums"
+                style={{ background: 'var(--bg-sunken)', color: 'var(--text-subtle)' }}>
+            {sorted.length + 1}
+          </span>
+        </div>
+
         {convos.loading && !convos.data && <Skeleton rows={3} />}
         {convos.error && !convos.data && (
           <ErrorState error={convos.error} onRetry={convos.reload} />
@@ -223,14 +252,77 @@ export function MessagesScreen() {
           onRead={convos.reload}
         />
       ) : (
-        <Card className="hidden lg:block">
-          <EmptyState
-            icon={<MessageSquare className="size-6" />}
-            title="Pick a conversation"
-            body="Team chat is shared with everyone. Direct messages are private."
-          />
+        <Card className="hidden lg:grid lg:place-items-center lg:py-16">
+          <NoConversation />
         </Card>
       )}
+    </div>
+  )
+}
+
+/**
+ * The right-hand pane before anything is picked.
+ *
+ * It replaced a generic EmptyState — an icon and two lines of grey text on the
+ * widest area of the screen, which read as a failure rather than a starting point.
+ *
+ * 🔴 THE THREE ROWS ARE FEATURES OF THIS SCREEN, NOT CLAIMS ABOUT IT. The obvious
+ * filler here is a trio of "Secure · Collaborate · Real-time" cards, and the first
+ * of those would be a lie: `WEB_AUTH_ENFORCE` is off in production, so any caller
+ * can read any conversation by changing a user id. Telling someone their messages
+ * are protected when they are not is the one thing this space must not do. Each row
+ * below is instead something you can act on in the next keystroke.
+ */
+function NoConversation() {
+  return (
+    <div className="max-w-sm px-6 text-center">
+      {/* Concentric rings rather than a flat circle — it gives the mark some depth
+          at no cost, and the outer ring is what stops it looking like a disabled
+          button. */}
+      <div className="relative mx-auto grid size-24 place-items-center">
+        <span className="absolute inset-0 rounded-full"
+              style={{ background: 'var(--accent-soft)', opacity: .5 }} />
+        <span className="absolute inset-3 rounded-full"
+              style={{ background: 'var(--accent-soft)' }} />
+        <MessageSquare className="relative size-8" style={{ color: 'var(--accent)' }} />
+      </div>
+
+      <h3 className="mt-5 text-[17px] font-semibold tracking-tight">Pick a conversation</h3>
+      <p className="mt-1.5 text-[13.5px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+        The team channel goes to everyone. A direct message goes to one person.
+      </p>
+
+      <div className="mt-7 space-y-2.5 text-left">
+        <Hint icon={<AtSign className="size-4" />}
+              title="Type @ to mention"
+              body="They get a distinct push, not the usual channel one." />
+        <Hint icon={<Reply className="size-4" />}
+              title="Hover a message to reply"
+              body="The quoted line stays attached to your answer." />
+        <Hint icon={<CheckCheck className="size-4" />}
+              title="Two ticks means read"
+              body="One tick is sent. Presence dots on the left are live." />
+      </div>
+    </div>
+  )
+}
+
+function Hint({ icon, title, body }: {
+  icon: React.ReactNode; title: string; body: string
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl px-3 py-2.5"
+         style={{ background: 'var(--bg-sunken)' }}>
+      <span className="mt-px grid size-7 shrink-0 place-items-center rounded-lg"
+            style={{ background: 'var(--bg-elevated)', color: 'var(--accent)' }}>
+        {icon}
+      </span>
+      <span className="min-w-0">
+        <span className="block text-[13px] font-medium">{title}</span>
+        <span className="block text-[12px] leading-snug" style={{ color: 'var(--text-subtle)' }}>
+          {body}
+        </span>
+      </span>
     </div>
   )
 }
@@ -447,14 +539,24 @@ function Thread({ open, title, subtitle, onBack, onRead }: {
         {rows.map((r, i) => {
           const authorId = r.sender_id ?? r.user_id
           const prevAuthor = i > 0 ? (rows[i - 1].sender_id ?? rows[i - 1].user_id) : null
+          // A divider whenever the DAY changes, and before the first message.
+          // Without it every bubble showed a bare time, so a message from Saturday
+          // and one from five minutes ago were indistinguishable — "6:04 pm" says
+          // nothing about which day, and a thread that goes quiet for a week reads
+          // as one continuous conversation.
+          const day = dayKeyOf(r.created_at)
+          const prevDay = i > 0 ? dayKeyOf(rows[i - 1].created_at) : null
           return (
-            <Bubble key={r.id} row={r} mine={authorId === me?.id}
+            <Fragment key={r.id}>
+            {day && day !== prevDay && <DayDivider iso={r.created_at} />}
+            <Bubble row={r} mine={authorId === me?.id}
                     // Only the FIRST message of a run gets a name label — the
                     // Flutter rule. Repeating it on every bubble in a back-and-forth
                     // turns a conversation into a list of labelled rows.
                     showAuthor={isTeam && authorId !== prevAuthor}
                     read={r.id <= readUpTo}
                     onReply={() => setReplyTo(r)} />
+            </Fragment>
           )
         })}
         {peerTyping && <TypingBubble />}
@@ -570,6 +672,39 @@ function TypingBubble() {
                 }} />
         ))}
       </div>
+    </div>
+  )
+}
+
+/** The IST calendar day a message belongs to, or null if unparseable.
+ *
+ *  🔴 GROUPED BY IST, NOT BY THE BROWSER'S DAY. The backend's whole world is IST and
+ *  every other date on screen is rendered in it, so a viewer in another timezone must
+ *  see the same day boundaries as the person they are talking to — otherwise the
+ *  divider disagrees with the times printed under the bubbles it separates. */
+function dayKeyOf(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? null : istDateKey(d)
+}
+
+/** "Today" / "Yesterday" / "Sat, 23 Aug". */
+function DayDivider({ iso }: { iso: string | null | undefined }) {
+  const d = iso ? new Date(iso) : null
+  if (!d || Number.isNaN(d.getTime())) return null
+  const yesterday = new Date(istNow().getTime() - 86_400_000)
+  const label = isToday(d) ? 'Today'
+    : istDateKey(d) === istDateKey(yesterday) ? 'Yesterday'
+    : dayLabel(d)
+  return (
+    // Sticky, so scrolling back through a long thread always tells you where you
+    // are rather than only at the moment a divider happens to be on screen.
+    <div className="sticky top-0 z-10 flex justify-center py-1">
+      <span className="rounded-full px-2.5 py-0.5 text-[11px] font-medium backdrop-blur"
+            style={{ background: 'var(--bg-elevated)', color: 'var(--text-subtle)',
+                     border: '1px solid var(--border)' }}>
+        {label}
+      </span>
     </div>
   )
 }
