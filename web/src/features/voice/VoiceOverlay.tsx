@@ -4,7 +4,7 @@ import { SPEAKERS } from '../../lib/speakers'
 import { useVoice } from './VoiceProvider'
 import { Button, Portal, cx } from '../../ui'
 import type { Phase } from '../../lib/liveVoice'
-import { VOICE_TAP_LABEL, VOICE_HOTKEY_LABEL } from '../../lib/hotkeys'
+import { VOICE_TAP_LABEL } from '../../lib/hotkeys'
 
 /**
  * Full-screen voice. A VIEW over the provider's engine, not the owner of it —
@@ -205,7 +205,11 @@ export function VoiceOverlay() {
              style={{ color: 'var(--text-subtle)' }}>
             <span><Kbd>Space</Kbd> start or interrupt</span>
             <span><Kbd>Esc</Kbd> close</span>
-            <span><Kbd>{VOICE_TAP_LABEL}</Kbd> or <Kbd>{VOICE_HOTKEY_LABEL}</Kbd> from anywhere</span>
+            {/* One global shortcut shown, not both. VOICE_HOTKEY still works — it is
+                registered in hotkeys.ts and unchanged — but a four-chip hint row
+                reads as a keyboard reference rather than a nudge, and the
+                double-tap is the more memorable of the two. */}
+            <span><Kbd>{VOICE_TAP_LABEL}</Kbd> from anywhere</span>
           </p>
         </footer>
       </div>
