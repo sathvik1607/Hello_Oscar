@@ -87,23 +87,18 @@ export function MessagesScreen() {
     }
   }), [reloadConvos])
 
-  /** Former teammates are HIDDEN by default. They are not deleted and their
-   *  threads are not lost — the toggle below the list brings them back — because
-   *  hiding them outright would make real history unreachable (measured: 11 and 8
-   *  messages behind the two former members in this workspace). "Not in the way"
-   *  and "not accessible" are different things. */
-  const [showFormer, setShowFormer] = useState(false)
-  const formerPeers = useMemo(() => (convos.data?.dms ?? [])
-    .filter(d => d.peer_active === false && d.last_message_at)
-    .map(d => d.peer_id), [convos.data])
-
+  /** Former teammates are not listed at all. Their DMs are NOT deleted — the rows
+   *  are untouched and /users/{id}/conversations still returns them — but nothing
+   *  in this UI links to the thread any more. That was the explicit ask, and the
+   *  cost is stated here rather than discovered later: the two former members in
+   *  this workspace hold 11 and 8 real messages that are now unreachable from the
+   *  app. Restoring access means showing them again, not recovering anything.
+   */
   const dmPeers = useMemo(() => {
     // A former teammate needs real history to be listable at all — otherwise the
     // list slowly fills with everyone who ever passed through the workspace.
     const fromConvos = (convos.data?.dms ?? [])
-      .filter(d => d.peer_active !== false
-        ? true
-        : Boolean(d.last_message_at) && showFormer)
+      .filter(d => d.peer_active !== false)
       .map(d => d.peer_id)
     // Everyone currently on the team is a possible DM, not only people already
     // talked to — otherwise there is no way to start a first conversation.
@@ -111,7 +106,7 @@ export function MessagesScreen() {
       .filter(m => m.is_active && m.user_id !== me?.id)
       .map(m => m.user_id)
     return Array.from(new Set([...fromConvos, ...roster]))
-  }, [convos.data, members.data, me?.id, showFormer])
+  }, [convos.data, members.data, me?.id])
 
   const unreadFor = useCallback((peerId: number) =>
     (convos.data?.dms ?? []).find(d => d.peer_id === peerId)?.unread ?? 0, [convos.data])
@@ -214,18 +209,6 @@ export function MessagesScreen() {
           )
         })}
 
-        {/* Former teammates: out of the way, not out of reach. Shown as a count so
-            it is obvious there is history here rather than an empty toggle. */}
-        {formerPeers.length > 0 && (
-          <button type="button"
-                  onClick={() => setShowFormer(v => !v)}
-                  className="mt-1 w-full rounded-xl px-3 py-2 text-left text-[11px] transition hover:bg-black/5 dark:hover:bg-white/5"
-                  style={{ color: 'var(--text-subtle)' }}>
-            {showFormer
-              ? 'Hide former members'
-              : `Show ${formerPeers.length} former member${formerPeers.length > 1 ? 's' : ''}`}
-          </button>
-        )}
       </Card>
 
       {/* ── thread ───────────────────────────────────────────────────── */}
