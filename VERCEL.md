@@ -49,8 +49,28 @@ READ them, and writing a key replaces its whole value — so I would silently de
 origins I cannot see, including the admin console. Send me its current value and I
 will extend it.
 
-## SPA rewrite
+## SPA rewrite — REQUIRED, not optional
 
-dist/vercel.json rewrites everything to /index.html. Without it a refresh on any
-path 404s. The app uses a hash router, so this is belt-and-braces rather than
-strictly required.
+`vercel.json` at the REPO ROOT (not `dist/`, as this said before) rewrites every
+path to `/index.html`:
+
+```json
+"rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+```
+
+🔴 **This is load-bearing as of the clean-URL migration.** The app used to use a
+hash router — `/#/tasks` — and a fragment is never sent to the server, so the
+rewrite was belt-and-braces. It now uses real paths, and `/tasks` is a request for
+a file that does not exist. Remove or mistype that line and **every refresh and
+every shared link 404s**, while `npm run build` and `tsc` both stay green: it is a
+hosting concern, not a code one.
+
+Vercel matches the FILESYSTEM before rewrites, so `/assets/*` and `/favicon.svg`
+are served normally and the catch-all only ever handles routes.
+
+Serving the app from a subpath instead of `/` would additionally require Vite's
+`base` — nothing does today.
+
+Old `/#/...` links keep working: `adoptLegacyHash()` in `src/App.tsx` rewrites them
+to the clean path on load. That is the only place it can be done, since the server
+never sees a fragment.

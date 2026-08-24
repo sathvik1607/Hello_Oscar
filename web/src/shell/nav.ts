@@ -1,6 +1,5 @@
 import {
-  Bell, CalendarDays, CheckSquare, Cog, Home, MessageSquare, MessagesSquare,
-  NotebookPen, Users,
+  Bell, CalendarDays, CheckSquare, Home, MessageSquare, MessagesSquare, Users,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
@@ -49,10 +48,30 @@ export const NAV: NavItem[] = [
   { id: 'calendar',      label: 'Calendar', icon: CalendarDays,   primary: true },
   { id: 'messages',      label: 'Chats',    icon: MessageSquare, needsTeam: true },
   { id: 'tasks',         label: 'Tasks',    icon: CheckSquare,    primary: true },
-  { id: 'notes',         label: 'Notes',    icon: NotebookPen },
+  /* Notes is HIDDEN from NAV, like Personalize. Route, screen and TITLES all stay —
+     `/notes` still works and the backend endpoints are untouched — so bringing it
+     back is uncommenting one line, not rebuilding a feature. */
+  // { id: 'notes',         label: 'Notes',    icon: NotebookPen },
   { id: 'notifications', label: 'Activity', icon: Bell },
-  { id: 'settings',      label: 'Settings', icon: Cog },
+  /* 🔴 SETTINGS IS NOT IN THIS LIST. It is reached by tapping the account block at
+     the bottom of the sidebar (AppShell) — where you already look to see which
+     account is signed in. Kept out of NAV so it stops taking a row from the nine
+     destinations people actually move between; the route and the screen are
+     unchanged, only the way in. */
 ]
+
+/**
+ * Every routable section — including the three that are deliberately absent from
+ * NAV (`notes`, `personalize`, `settings`).
+ *
+ * 🔴 THE ROUTER MUST VALIDATE AGAINST THIS, NOT AGAINST `NAV`. NAV is the SIDEBAR;
+ * a section being hidden from it says nothing about whether its URL is real. Built
+ * from TITLES because that record is typed `Record<SectionId, …>`, so the compiler
+ * refuses to let a new section be added without appearing here — a hand-written
+ * second list would silently fall out of date, which is exactly how `/settings`
+ * came to resolve to Today.
+ */
+export const SECTION_IDS = (): SectionId[] => Object.keys(TITLES) as SectionId[]
 
 export const TITLES: Record<SectionId, { title: string; subtitle: string }> = {
   today:         { title: 'Today',    subtitle: 'What needs you right now' },
