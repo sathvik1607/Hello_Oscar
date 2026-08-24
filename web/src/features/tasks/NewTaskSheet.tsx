@@ -3,9 +3,10 @@ import { X } from 'lucide-react'
 import { ApiError, tasks as tasksApi } from '../../lib/api'
 import { istDateKey, istNow } from '../../lib/format'
 import { Button, Field, IconButton, Portal, cx, inputCls, inputStyle } from '../../ui'
+import type { Task } from '../../lib/types'
 
 /**
- * Create a task by hand.
+ * Create OR EDIT a task by hand.
  *
  * Oscar is the better path for most of these ("remind me to call the supplier at
  * 4"), and this exists for the case Oscar is worse at: you already know exactly
@@ -13,19 +14,33 @@ import { Button, Field, IconButton, Portal, cx, inputCls, inputStyle } from '../
  * small — title, when, priority — rather than a mirror of every field the API
  * accepts.
  *
+ * ONE FORM, TWO MODES. Editing reuses this rather than getting its own sheet,
+ * because the interesting part is the date/time handling below — duplicating it
+ * would mean two places to get IST wrong, and only one of them would be tested.
+ *
  * 🔴 `due_at` is sent IST-NAIVE. The backend stores these digits verbatim with no
  * timezone, so sending an ISO string with a Z would land the task hours off — and
  * a due time in the past is born overdue, which fires a reminder immediately.
  */
-export function NewTaskSheet({ onClose, onCreated }: {
+export function NewTaskSheet({ onClose, onCreated, task }: {
   onClose: () => void
   onCreated: () => void
+  /** Present = edit that task. Absent = create a new one. */
+  task?: Task | null
 }) {
-  const [title, setTitle] = useState('')
-  const [date, setDate] = useState(istDateKey(istNow()))
-  const [time, setTime] = useState(defaultTime())
-  const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium')
-  const [description, setDescription] = useState('')
+  const editing = Boolean(task)
+  // Seeded from the task when editing. `due_at` arrives IST-naive
+  // ("2026-08-24 18:30:00"), so it is SPLIT on the literal characters rather than
+  // parsed into a Date — new Date(...) would apply the browser's offset and shift
+  // the time the user sees by hours.
+  const seededDate = task?.due_at ? task.due_at.slice(0, 10) : null
+  const seededTime = task?.due_at ? task.due_at.slice(11, 16) : null
+  const [title, setTitle] = useState(task?.title ?? '')
+  const [date, setDate] = useState(seededDate ?? istDateKey(istNow()))
+  const [time, setTime] = useState(seededTime ?? defaultTime())
+  const [priority, setPriority] = useState<'low' | 'medium' | 'high'>(
+    (task?.priority as 'low' | 'medium' | 'high') ?? 'medium')
+  const [description, setDescription] = useState(task?.description ?? '')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const titleRef = useRef<HTMLInputElement>(null)
@@ -48,12 +63,21 @@ export function NewTaskSheet({ onClose, onCreated }: {
       // Built from the date/time PARTS, so the browser's timezone never enters
       // the value. IST-naive is what the backend stores.
       const due_at = `${date}T${time}:00`
-      await tasksApi.create({
-        title: t,
-        ...(description.trim() ? { description: description.trim() } : {}),
-        due_at,
-        priority,
-      })
+      if (task) {
+        // Description is sent even when EMPTY, unlike on create: clearing a
+        // description is a legitimate edit, and omitting the key would silently
+        // leave the old text in place.
+        await tasksApi.update(task.id, {
+          title: t, due_at, priority, description: description.trim(),
+        })
+      } else {
+        await tasksApi.create({
+          title: t,
+          ...(description.trim() ? { description: description.trim() } : {}),
+          due_at,
+          priority,
+        })
+      }
       onCreated()
     } catch (e2) {
       setErr(e2 instanceof ApiError ? e2.message : String(e2))
@@ -66,14 +90,14 @@ export function NewTaskSheet({ onClose, onCreated }: {
       <button aria-label="Close" onClick={onClose}
               className="fade fixed inset-0 z-40 bg-black/30" />
       <div
-        role="dialog" aria-modal="true" aria-label="New task"
+        role="dialog" aria-modal="true" aria-label={editing ? 'Edit task' : 'New task'}
         className="rise fixed inset-x-0 bottom-0 z-50 rounded-t-3xl border-t p-5
                    sm:inset-0 sm:m-auto sm:h-fit sm:max-w-md sm:rounded-2xl sm:border"
         style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border)',
                  paddingBottom: 'calc(env(safe-area-inset-bottom) + 20px)' }}
       >
         <div className="mb-5 flex items-center justify-between">
-          <h2 className="text-[15px] font-semibold">New task</h2>
+          <h2 className="text-[15px] font-semibold">{editing ? 'Edit task' : 'New task'}</h2>
           <IconButton label="Close" onClick={onClose}><X className="size-5" /></IconButton>
         </div>
 
@@ -135,7 +159,7 @@ export function NewTaskSheet({ onClose, onCreated }: {
           <div className="flex gap-2 pt-1">
             <Button type="submit" variant="primary" loading={busy}
                     disabled={!title.trim()} className="flex-1">
-              Create task
+              {editing ? 'Save changes' : 'Create task'}
             </Button>
             <Button type="button" onClick={onClose}>Cancel</Button>
           </div>

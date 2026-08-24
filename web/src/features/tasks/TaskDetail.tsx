@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Check, ChevronDown, Clock, Flag, Trash2, Users, X } from 'lucide-react'
+import { Check, ChevronDown, Clock, Flag, Pencil, Trash2, Users, X } from 'lucide-react'
 import { ApiError, tasks as tasksApi } from '../../lib/api'
 import { getUser } from '../../lib/session'
 import { dueLabel, messageTime, parseIstNaive, relative } from '../../lib/format'
 import type { Task } from '../../lib/types'
 import { CommentComposer, CommentList, useCommentThread } from './CommentThread'
+import { NewTaskSheet } from './NewTaskSheet'
 import {
   Badge, Button, IconButton, Portal, STATUS_LABEL, cx,
 } from '../../ui'
@@ -38,6 +39,7 @@ export function TaskDetail({ task, onClose, onChanged }: {
   const me = getUser()
   const [err, setErr] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [editing, setEditing] = useState(false)
   const [showDetails, setShowDetails] = useState(false)
   const [busyAction, setBusyAction] = useState(false)
 
@@ -217,6 +219,11 @@ export function TaskDetail({ task, onClose, onChanged }: {
                     loading={busyAction} onClick={() => void toggleComplete()}>
               <Check className="size-3.5" /> {done ? 'Reopen' : 'Mark complete'}
             </Button>
+            {!confirmDelete && (
+              <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>
+                <Pencil className="size-3.5" /> Edit
+              </Button>
+            )}
             {confirmDelete ? (
               <>
                 <Button size="sm" variant="danger" onClick={() => void remove()}>
@@ -235,6 +242,19 @@ export function TaskDetail({ task, onClose, onChanged }: {
               </Button>
             )}
           </div>
+
+          {editing && (
+            <NewTaskSheet
+              task={task}
+              onClose={() => setEditing(false)}
+              onCreated={() => {
+                setEditing(false)
+                // Reload rather than patching locally: an edit can change due_at,
+                // which moves the task between buckets on the list behind this.
+                onChanged()
+              }}
+            />
+          )}
 
           {err && (
             <p className="mt-3 text-[13px]" style={{ color: '#DC2626' }}>{err}</p>
