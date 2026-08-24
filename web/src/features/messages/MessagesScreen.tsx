@@ -9,7 +9,8 @@ import { subscribe } from '../../lib/appSocket'
 import { lastSeenLabel, messageTime, titleCaseName } from '../../lib/format'
 import { resolvePresence, usePresence } from '../../lib/presence'
 import { usePeerTyping, useTypingSignal } from '../../lib/typing'
-import type { ChatText } from '../../lib/types'
+import type { ChatText, TeamMember } from '../../lib/types'
+import { activeQuery, applyPick, matches, resolve } from './mentions'
 import { Avatar } from '../../shell/AppShell'
 import {
   Button, Card, EmptyState, ErrorState, IconButton, Skeleton, cx, inputCls, inputStyle,
@@ -289,6 +290,20 @@ function Thread({ open, title, subtitle, onBack, onRead }: {
 
   const readUpTo = Math.max(h.data?.read_up_to_id ?? 0, live.readUpTo)
   const [draft, setDraft] = useState('')
+  /** @mention picker state. `caret` is tracked because the query is whatever sits
+   *  between the last '@' and the cursor — so typing mid-sentence works. */
+  const [mentionQ, setMentionQ] = useState<string | null>(null)
+  const [mentionIdx, setMentionIdx] = useState(0)
+  const taRef = useRef<HTMLTextAreaElement | null>(null)
+  // Only group chat has mentions; a DM already has exactly one recipient. useApi
+  // needs a fetcher unconditionally, so a DM resolves to an empty list rather than
+  // being skipped — one wasted resolved promise beats a conditional hook.
+  const mentionTeamId = isTeam ? open.teamId : 0
+  const memberList = useApi<TeamMember[]>(
+    c => mentionTeamId ? teamApi.members(mentionTeamId, c) : Promise.resolve([]),
+    [mentionTeamId])
+  const members: TeamMember[] = memberList.data ?? []
+  const picks = mentionQ === null ? [] : matches(members, mentionQ, me?.id ?? 0)
   const [replyTo, setReplyTo] = useState<ChatText | null>(null)
   const [sending, setSending] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -364,13 +379,33 @@ function Thread({ open, title, subtitle, onBack, onRead }: {
     }
   }, [rows.length])
 
+  const pick = useCallback((m: TeamMember) => {
+    const ta = taRef.current
+    const caret = ta?.selectionStart ?? draft.length
+    const next = applyPick(draft, caret, m.name)
+    setDraft(next.text)
+    setMentionQ(null)
+    // The caret must be restored AFTER React repaints, or the browser puts it at
+    // the end of the textarea and a mid-sentence mention sends the cursor away.
+    requestAnimationFrame(() => {
+      ta?.focus()
+      ta?.setSelectionRange(next.caret, next.caret)
+    })
+  }, [draft])
+
   const send = useCallback(async () => {
     const text = draft.trim()
     if (!text || sending) return
     setSending(true); setErr(null)
     try {
+      // Resolved from the FINAL text, not from offsets tracked while typing —
+      // an edit earlier in the line shifts every stored index and tags the wrong
+      // person.
+      const m = isTeam ? resolve(text, members, me?.id ?? 0)
+                       : { mentions: [], mention_all: false }
       const row = isTeam
-        ? await msgApi.sendTeam(open.teamId, text, replyTo?.id ?? null)
+        ? await msgApi.sendTeam(open.teamId, text, replyTo?.id ?? null,
+                                m.mentions, m.mention_all)
         : await msgApi.sendDirect(open.peerId, text, replyTo?.id ?? null)
       setLive(v => v.rows.some(r => r.id === row.id)
       ? v : { ...v, rows: [...v.rows, row] })
@@ -379,7 +414,7 @@ function Thread({ open, title, subtitle, onBack, onRead }: {
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : String(e))
     } finally { setSending(false) }
-  }, [draft, sending, isTeam, open, replyTo, stopTyping])
+  }, [draft, sending, isTeam, open, replyTo, stopTyping, members, me?.id])
 
   return (
     <Card className="flex h-[calc(100dvh-230px)] flex-col overflow-hidden lg:h-[calc(100dvh-190px)]">
@@ -441,11 +476,61 @@ function Thread({ open, title, subtitle, onBack, onRead }: {
             </button>
           </div>
         )}
+        {/* @mention picker. Positioned above the composer because a list that
+            covers the message you are replying to is worse than one that covers
+            older history. */}
+        {isTeam && picks.length > 0 && (
+          <div className="mb-1.5 overflow-hidden rounded-lg border"
+               style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}>
+            {picks.map((m, i) => (
+              <button key={m.user_id} type="button"
+                      // onMouseDown, not onClick: onClick fires after blur, and the
+                      // blur closes the picker before the pick is registered.
+                      onMouseDown={e => { e.preventDefault(); pick(m) }}
+                      className={cx('flex w-full items-center gap-2 px-3 py-2 text-left text-[13px]',
+                                    i === mentionIdx && 'bg-black/5 dark:bg-white/10')}>
+                <Avatar name={m.name} size={20} />
+                <span className="truncate">{titleCaseName(m.name)}</span>
+                {m.online && <span className="ml-auto text-[10px]"
+                                   style={{ color: 'var(--text-subtle)' }}>online</span>}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex items-end gap-2">
           <textarea
+            ref={taRef}
             value={draft}
-            onChange={e => { setDraft(e.target.value); onKeystroke() }}
+            onChange={e => {
+              setDraft(e.target.value)
+              setMentionQ(isTeam
+                ? activeQuery(e.target.value, e.target.selectionStart ?? 0) : null)
+              setMentionIdx(0)
+              onKeystroke()
+            }}
+            // Clicking elsewhere in the text moves the caret, which changes which
+            // token is being typed — without this the picker keeps showing a query
+            // the cursor has left.
+            onSelect={e => setMentionQ(isTeam
+              ? activeQuery(draft, (e.target as HTMLTextAreaElement).selectionStart ?? 0)
+              : null)}
+            onBlur={() => setMentionQ(null)}
             onKeyDown={e => {
+              if (picks.length > 0) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault(); setMentionIdx(i => (i + 1) % picks.length); return
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault()
+                  setMentionIdx(i => (i - 1 + picks.length) % picks.length); return
+                }
+                // Enter completes the mention rather than sending — sending a
+                // half-typed name is the mistake this whole picker exists to stop.
+                if (e.key === 'Enter' || e.key === 'Tab') {
+                  e.preventDefault(); pick(picks[mentionIdx]); return
+                }
+                if (e.key === 'Escape') { e.preventDefault(); setMentionQ(null); return }
+              }
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() }
             }}
             rows={1}

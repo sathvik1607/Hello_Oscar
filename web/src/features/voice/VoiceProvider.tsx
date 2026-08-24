@@ -129,11 +129,24 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       ? (await import('../../lib/liveVoice')).LiveVoice
       : (await import('../../lib/geminiVoice')).GeminiVoice
     const lv = new Engine({
-      onPhase: p => setSt(s => ({
-        ...s, phase: p, running: true,
-        speaking: p === 'speaking',
-        partial: p === 'listening' ? '' : s.partial,
-      })),
+      onPhase: p => setSt(s => {
+        // 🔴 CLEAR THE SCREEN AT THE END OF A COMPLETED TURN. Returning to
+        // `listening` FROM `speaking` is the only reliable end-of-turn signal on
+        // the Gemini path: `turnComplete` means generation finished, while seconds
+        // of audio can still be queued, so the buffer draining is the honest end.
+        //
+        // Only from `speaking`, deliberately. Clearing on every `listening` would
+        // wipe the transcript the instant a barge-in cut the reply off — losing
+        // exactly the text the user interrupted to correct.
+        const turnEnded = p === 'listening' && s.phase === 'speaking'
+        return {
+          ...s, phase: p, running: true,
+          speaking: p === 'speaking',
+          partial: p === 'listening' ? '' : s.partial,
+          heard: turnEnded ? '' : s.heard,
+          reply: turnEnded ? '' : s.reply,
+        }
+      }),
       onLevel: level => setSt(s => (
         // Only while listening: the orb is the only consumer, and updating state
         // ~10×/second through a whole reply re-renders the app for nothing.
