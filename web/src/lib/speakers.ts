@@ -34,13 +34,8 @@ export const GEMINI_VOICES = [
 
 /** Which engine is compiled in. Build-time: Vite inlines this and tree-shakes the
  *  loser, so it cannot change at runtime. */
-/** 🔴 SARVAM IS THE DEFAULT, so Gemini is OPT-IN via VITE_VOICE_ENGINE=gemini.
- *  Sarvam is the path that has been in production for months; Gemini is faster and
- *  measurably better on latency, but it persists only a lossy transcript and the
- *  fabrication work on it is unfinished. Defaulting to the proven one means a
- *  deployment cannot switch voice engines by accident. */
 export const VOICE_ENGINE =
-  (import.meta.env.VITE_VOICE_ENGINE as string) === 'gemini' ? 'gemini' : 'sarvam'
+  (import.meta.env.VITE_VOICE_ENGINE as string) === 'sarvam' ? 'sarvam' : 'gemini'
 
 /**
  * 🔴 The picker MUST follow the engine. With Gemini compiled in, the Sarvam list
