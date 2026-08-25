@@ -190,9 +190,16 @@ export function TodayScreen() {
               body={done.length > 0
                 ? `You finished ${done.length} ${done.length === 1 ? 'task' : 'tasks'}. Nothing else is due.`
                 : 'Add something you need to do today, or plan your day from your notes.'}
-              action={<Button variant="primary" onClick={() => setCreating(true)}>
-                <Plus className="size-4" /> New task
-              </Button>}
+              /* Desktop only. On a phone the card's own New task button sits a
+                 couple of hundred pixels above this one, so rendering both put two
+                 identical full-width buttons on the same screen. On desktop they
+                 are far apart — header top-right versus the middle of an empty
+                 card — so both reading as calls to action is fine. */
+              action={<div className="hidden sm:block">
+                <Button variant="primary" onClick={() => setCreating(true)}>
+                  <Plus className="size-4" /> New task
+                </Button>
+              </div>}
             />
           </Card>
         ) : (
