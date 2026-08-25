@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, Copy, ExternalLink } from 'lucide-react'
 
@@ -112,23 +112,44 @@ function LinkMenu({ href, x, y, onClose }: {
   href: string; x: number; y: number; onClose: () => void
 }) {
   const [copied, setCopied] = useState(false)
+  const box = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    // `capture`, so a click anywhere closes this before that element's own handler
-    // runs — otherwise dismissing the menu could also open the task behind it.
-    const onDown = () => onClose()
+    /**
+     * 🔴 THE MENU IS EXCLUDED BY CONTAINMENT, NOT BY stopPropagation — and getting
+     * that wrong is what made both buttons dead on the first version.
+     *
+     * This listener is `capture` on WINDOW, deliberately, so a click anywhere else
+     * dismisses the menu before that element's own handler runs (otherwise
+     * dismissing could also open the task behind it). But React attaches its
+     * synthetic handlers at the ROOT CONTAINER, which is a descendant of window —
+     * so a capture listener here fires FIRST, and the menu's own
+     * `onPointerDown={e => e.stopPropagation()}` never gets the chance to run.
+     * Result: pointerdown closed the menu, it unmounted, and the click event that
+     * would have followed had nothing left to land on. The menu appeared, and
+     * nothing you pressed did anything.
+     *
+     * A ref containment check runs in the same phase as the listener, so it cannot
+     * lose that race.
+     */
+    const onDown = (e: Event) => {
+      if (box.current?.contains(e.target as Node)) return
+      onClose()
+    }
     window.addEventListener('keydown', onKey)
     window.addEventListener('pointerdown', onDown, true)
     // A menu pinned to viewport coordinates is in the wrong place the moment
-    // anything scrolls, so it closes rather than drifting.
-    window.addEventListener('scroll', onDown, true)
-    window.addEventListener('resize', onDown)
+    // anything scrolls, so it closes rather than drifting. Unconditional — unlike
+    // the pointer case there is nothing inside the menu worth scrolling.
+    const onGone = () => onClose()
+    window.addEventListener('scroll', onGone, true)
+    window.addEventListener('resize', onGone)
     return () => {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('pointerdown', onDown, true)
-      window.removeEventListener('scroll', onDown, true)
-      window.removeEventListener('resize', onDown)
+      window.removeEventListener('scroll', onGone, true)
+      window.removeEventListener('resize', onGone)
     }
   }, [onClose])
 
@@ -168,12 +189,12 @@ function LinkMenu({ href, x, y, onClose }: {
   const top = Math.min(y + 8, Math.max(8, window.innerHeight - 116))
 
   return createPortal(
-    <div role="menu" aria-label="Link actions"
+    <div ref={box} role="menu" aria-label="Link actions"
          className="fade fixed z-[95] w-[252px] overflow-hidden rounded-xl border shadow-xl"
          style={{ left, top, background: 'var(--bg-elevated)', borderColor: 'var(--border)' }}
-         // The menu is inside the capture-phase dismiss listener above, so its own
-         // clicks have to be held back from it or it would close before acting.
-         onPointerDown={e => e.stopPropagation()}
+         // Still stopped, so a click that DOES land here cannot bubble on to the card
+         // or row underneath. The containment check above is what keeps the menu
+         // alive long enough for that to happen.
          onClick={e => e.stopPropagation()}>
       {/* The URL itself, because a menu that does not say WHICH link it is about is
           guesswork when a message contains two of them. */}
