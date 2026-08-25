@@ -119,6 +119,8 @@ export function TodayScreen() {
                 </p>
               )}
             </div>
+            {/* Desktop only — the mobile copy lives below the pills, because a
+                button beside the headline squeezes it on a narrow screen. */}
             <div className="hidden shrink-0 sm:block">
               <Button variant="primary" onClick={() => setCreating(true)}>
                 <Plus className="size-4" /> New task
@@ -126,8 +128,22 @@ export function TodayScreen() {
             </div>
           </div>
 
+          {/* 🔴 THE ONLY WAY TO ADD A TASK FROM TODAY ON A PHONE.
+              The header button is `hidden sm:block`, so below 640px it did not
+              exist — and the empty-state button only renders when the timeline is
+              EMPTY. So the moment you had a single task, Today offered no way to
+              create another: you had to go to Tasks. The bottom-right FAB slot is
+              taken by floating Oscar (AppShell), so this goes inline rather than
+              becoming a second FAB competing for the same thumb position. */}
+          <div className="mt-5 sm:hidden">
+            <Button variant="primary" onClick={() => setCreating(true)}
+                    className="w-full">
+              <Plus className="size-4" /> New task
+            </Button>
+          </div>
+
           {(timeline.length > 0 || done.length > 0 || todaysMeetings.length > 0) && (
-            <div className="mt-5 flex flex-wrap gap-2">
+            <div className="mt-4 flex flex-wrap gap-2 sm:mt-5">
               {timeline.length > 0 && (
                 <Pill icon={<Clock className="size-3.5" />} label="to do"
                       value={timeline.length} />
