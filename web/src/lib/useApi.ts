@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError } from './api'
-import { read, write } from './cache'
+import { invalidate, read, write } from './cache'
 
 /**
  * One fetch per view, with the abort wired up and a stale-while-revalidate cache.
@@ -35,7 +35,27 @@ export function useApi<T>(
   const fn = useRef(fetcher)
   useEffect(() => { fn.current = fetcher }, [fetcher])
 
-  const reload = useCallback(() => setNonce(n => n + 1), [])
+  /**
+   * Refetch, and DROP the cached value first.
+   *
+   * 🔴 Without the invalidate this was a stale-while-revalidate refresh, which is
+   * wrong after a MUTATION. The effect re-reads the cache and paints it before the
+   * request goes out, so cancelling a task made the row reappear for the length of
+   * the round trip: the sheet closed, the task came back, then vanished again ~300ms
+   * later. It read as "cancel didn't work", and clicking again did nothing visible
+   * because the second cancel was already a no-op.
+   *
+   * It only ever looked correct because the WS `task.deleted` frame invalidates via
+   * useLiveData and usually won the race. So the bug was invisible with a healthy
+   * socket and fully present without one — exactly the conditions nobody tests.
+   *
+   * Stale-while-revalidate is still the behaviour on MOUNT (see the effect below),
+   * which is what makes a revisit instant. That is a read; this is a write.
+   */
+  const reload = useCallback(() => {
+    if (cacheKey) invalidate(cacheKey)
+    setNonce(n => n + 1)
+  }, [cacheKey])
 
   useEffect(() => {
     const ac = new AbortController()
