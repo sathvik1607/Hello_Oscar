@@ -5,7 +5,7 @@ import { useApi } from '../../lib/useApi'
 import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
 import { getUser, identityIsStale, signOutStaleIdentity } from '../../lib/session'
 import {
-  dayLabel, isPast, isToday, isTomorrow, istDateKey, messageTime, parseIstNaive,
+  dayLabel, isPast, isToday, isTomorrow, istDateKey, istNow, messageTime, parseIstNaive,
 } from '../../lib/format'
 import { resolvePresence, usePresence } from '../../lib/presence'
 import type { Task } from '../../lib/types'
@@ -132,8 +132,22 @@ export function TeamScreen() {
    */
   const shown = useMemo(() => {
     const raw = selected ? (memberTasks.data?.tasks ?? []) : (projects.data?.tasks ?? [])
+    /**
+     * 🔴 A PICKED MEMBER IS SCOPED TO TODAY. The workspace view is a planning
+     * view — everything ahead and everything that slipped — but picking a person
+     * off the roster asks a narrower question: what is this member on RIGHT NOW.
+     * Their whole backlog answered that with weeks of history and a scroll.
+     *
+     * Today by the IST calendar day (istDateKey, same as the grouping below), so a
+     * task at 23:30 counts as today rather than being pushed over by the browser's
+     * offset. Undated tasks are dropped here as well — they are dropped by the
+     * grouping anyway, and a task with no date is not "today".
+     */
+    const scoped = selected
+      ? raw.filter(t => isToday(parseIstNaive(t.due_at)))
+      : raw
     const closed = (t: Task) => t.status === 'completed' || t.status === 'cancelled'
-    return [...raw].sort((a, b) =>
+    return [...scoped].sort((a, b) =>
       Number(closed(a)) - Number(closed(b)) || byDueAsc(a, b))
   }, [selected, memberTasks.data, projects.data])
   const activeShown = shown.filter(t => t.status !== 'cancelled')
@@ -358,12 +372,16 @@ export function TeamScreen() {
         {!projects.loading && !memberTasks.loading && activeShown.length === 0 && (
           <Card>
             <EmptyState
+              /* Says TODAY, because that is what the list is scoped to when a
+                 member is picked. "Nothing open" would be a claim about their
+                 whole backlog, which this view no longer shows — and they may
+                 well have plenty, just not due today. */
               title={headingName
-                ? (headingName === 'Your' ? 'You have nothing open'
-                   : `${selectedMember?.name} has nothing open`)
+                ? (headingName === 'Your' ? 'Nothing on today'
+                   : `${selectedMember?.name} has nothing on today`)
                 : 'No team projects'}
               body={selectedMember
-                ? 'Tasks assigned to them will show here.'
+                ? 'Their tasks due today will show here.'
                 : 'Project tasks shared across the workspace appear here.'}
               /* Desktop only, same reasoning as Today: on a phone this sits a short
                  scroll below the identical button in the section header, so both
@@ -421,12 +439,16 @@ export function TeamScreen() {
            intent of pressing this button here — making you re-pick the same person
            inside the form is a step that can only be got wrong, and getting it
            wrong sends work to the wrong person.
-           No seedDate: unlike Today, this screen has no single day in view (it
+           seedDate follows the SCOPE: with a member picked the list is today only,
+           so a task created for another day would be filed correctly and then
+           disappear from the list you are looking at, which reads as the create
+           having failed. On the workspace view there is no single day in view (it
            groups across Overdue/Today/Tomorrow/…), so the form's own default is
-           the honest starting point.
+           the honest starting point there.
            A task for someone else lands on the team board automatically —
            NewTaskSheet forces is_project when the assignee is not you. */
         <NewTaskSheet
+          seedDate={selected ? istDateKey(istNow()) : null}
           seedAssignees={selected ? [selected] : null}
           onClose={() => setCreating(false)}
           onCreated={() => {
