@@ -84,6 +84,21 @@ export function TodayScreen() {
   const openToday = useMemo(
     () => timeline.filter(x => x.status !== 'completed'), [timeline])
 
+  /**
+   * Split into TIMED and ANYTIME, rendered as two groups.
+   *
+   * An anytime task has no place on a clock, so interleaving it with timed work
+   * forced a choice between two wrong answers: sort it by its stored 23:59 and it
+   * claims a late-evening slot nobody set, or drop it anywhere else and the column
+   * of times stops being ordered. Its own group says the honest thing — some time
+   * that day, no particular hour — and keeps the timed list a clean timeline.
+   *
+   * Both keep their existing order (byDueAsc already sorts anytime last, so the
+   * split is a partition of an already-correct list, not a re-sort).
+   */
+  const timed = useMemo(() => timeline.filter(x => !x.is_all_day), [timeline])
+  const anytime = useMemo(() => timeline.filter(x => x.is_all_day), [timeline])
+
   // Next up must be something still to DO — a finished task is not "next".
   const nextUp = openToday.find(x => !isReallyOverdue(x)) ?? openToday[0]
   const nextDue = nextUp?.due_at ? parseIstNaive(nextUp.due_at) : null
@@ -218,18 +233,42 @@ export function TodayScreen() {
             />
           </Card>
         ) : (
-          <div className="space-y-2">
-            {timeline.map(task => (
-              <TaskCard
-                key={task.id} task={task}
-                busy={busyId === task.id}
-                onToggle={() => void toggle(task)}
-                onOpen={() => { comments.markSeen(task.id); setOpenTask(task) }}
-                        unreadComments={comments.byItem.get(task.id)}
-                showAssignee
-              />
-            ))}
-          </div>
+          <>
+            <div className="space-y-2">
+              {timed.map(task => (
+                <TaskCard
+                  key={task.id} task={task}
+                  busy={busyId === task.id}
+                  onToggle={() => void toggle(task)}
+                  onOpen={() => { comments.markSeen(task.id); setOpenTask(task) }}
+                  unreadComments={comments.byItem.get(task.id)}
+                  showAssignee
+                />
+              ))}
+            </div>
+
+            {/* ── ANYTIME: no particular hour, so its own group under the clock ── */}
+            {anytime.length > 0 && (
+              <div className={timed.length > 0 ? 'mt-5' : undefined}>
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider"
+                     style={{ color: 'var(--text-subtle)' }}>
+                  Anytime
+                </div>
+                <div className="space-y-2">
+                  {anytime.map(task => (
+                    <TaskCard
+                      key={task.id} task={task}
+                      busy={busyId === task.id}
+                      onToggle={() => void toggle(task)}
+                      onOpen={() => { comments.markSeen(task.id); setOpenTask(task) }}
+                      unreadComments={comments.byItem.get(task.id)}
+                      showAssignee
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </section>
 

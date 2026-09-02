@@ -115,14 +115,13 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee,
              style={{ borderColor: 'var(--border)' }}>
           {task.is_all_day ? (
             <>
-              {/* "Anytime" plus the DUE date — the day the task is FOR, which is
-                  also what the list is sorted by. An earlier version printed the
-                  created date ("Added 29 Aug") and that answered a question nobody
-                  asks: when a task was typed is trivia, when it is meant to happen
-                  is the point. Never the 23:59 time itself, which is a placeholder
-                  and would read as a late-evening deadline. */}
-              <div className="text-[10px] font-medium uppercase tracking-wide"
-                   style={{ color: 'var(--text-subtle)' }}>Anytime</div>
+              {/* Just the DATE — the day the task is for.
+                  No "Anytime" word: the section heading above the group already
+                  says it, and repeating it on every card is noise. No time either,
+                  ever: the stored 23:59 is a placeholder, not a chosen hour, and
+                  printing it would read as a late-evening deadline. And not the
+                  CREATED date, which an earlier version showed — when a task was
+                  typed is trivia; when it is meant to happen is the point. */}
               <div className="text-[12.5px] font-semibold tabular-nums"
                    style={{ color: 'var(--text-muted)' }}>
                 {due ? dayMonthLabel(due) : '—'}
