@@ -143,12 +143,17 @@ export function TeamScreen() {
    * 300 project tasks. Dated headings turn it into "what is on today, what is
    * tomorrow, what has slipped".
    *
-   * Five headings, in the order they matter:
+   * Four headings, in the order they matter:
    *   Overdue          past its time and still open — first, always
    *   Today / Tomorrow
    *   a named day      "Mon 25 Aug"
-   *   No date          undated work, late: it cannot be late
-   *   Done             finished work, last of all
+   *   Done · <day>     finished work, by the day it was due, last of all
+   *
+   * 🔴 There is no "No date" heading, open or done. A heading with no day in it is
+   * not a group, it is a pile — nothing about an undated row says when it matters,
+   * so it could only grow and never resolve. Those tasks are untouched and still
+   * visible on Tasks and in the member's own list; they are just not part of a view
+   * about who is doing what this week.
    *
    * Keyed on istDateKey, the IST calendar day, so a task at 23:30 stays on its own
    * date instead of being pushed into the next one by the browser's offset.
@@ -168,11 +173,15 @@ export function TeamScreen() {
         // single group it was 83 tasks spanning weeks, and because the list is sorted
         // by full datetime the visible times cycled — 08:00, 20:11, 08:00, 12:00 —
         // which reads as unsorted even though it is not.
-        const key = due ? `done-${istDateKey(due)}` : 'done-none'
-        const label = !due ? 'Done · no date'
-          : isToday(due) ? 'Done today'
-          : `Done · ${dayLabel(due)}`
-        find(key, label, 4).tasks.push(t)
+        //
+        // Undated finished work is DROPPED, for the same reason the open "No date"
+        // group went: a heading with no day in it is not a group, it is a pile, and
+        // on a screen about who is doing what this week it answers nothing. Finished
+        // AND undated is the least useful row on the page.
+        if (!due) continue
+        find(`done-${istDateKey(due)}`,
+             isToday(due) ? 'Done today' : `Done · ${dayLabel(due)}`,
+             4).tasks.push(t)
       }
       // 🔴 UNDATED WORK IS NOT SHOWN. It had its own "No date" group, which was a
       // place tasks went to be forgotten: nothing about a row with no date says
