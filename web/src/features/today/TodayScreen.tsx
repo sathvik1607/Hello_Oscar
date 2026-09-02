@@ -58,6 +58,11 @@ export function TodayScreen() {
   // Keyed on `t.data`, NOT on `t.data?.tasks ?? []`. That fallback allocates a new
   // array on every render, so the memo below it would recompute every time — and
   // these two run over the whole task list.
+  /** Which pill is filtering the list, if any. One at a time — combining them
+   *  ("critical AND anytime") is a query nobody asked for, and two active rings
+   *  would leave no way to tell what the list is showing. */
+  const [pick, setPick] = useState<'overdue' | 'critical' | 'anytime' | 'done' | null>(null)
+
   const allTasks = useMemo(() => t.data?.tasks ?? [], [t.data])
   const timeline = useMemo(() => todayTimeline(allTasks), [allTasks])
   const done = useMemo(() => completedToday(allTasks), [allTasks])
@@ -99,6 +104,22 @@ export function TodayScreen() {
   const timed = useMemo(() => timeline.filter(x => !x.is_all_day), [timeline])
   const anytime = useMemo(() => timeline.filter(x => x.is_all_day), [timeline])
 
+  /**
+   * The rows actually rendered, after the pill filter.
+   *
+   * Applied to the two GROUPS rather than to `timeline`, so the timed/anytime split
+   * and their order survive filtering — a filter that also reshuffled the list would
+   * make it hard to see what changed.
+   */
+  const match = (t: Task) =>
+    pick === null ? true
+    : pick === 'overdue' ? isReallyOverdue(t)
+    : pick === 'critical' ? (t.priority === 'critical' || t.priority === 'high')
+    : pick === 'anytime' ? !!t.is_all_day
+    : t.status === 'completed'
+  const shownTimed = useMemo(() => timed.filter(match), [timed, pick])
+  const shownAnytime = useMemo(() => anytime.filter(match), [anytime, pick])
+
   // Next up must be something still to DO — a finished task is not "next".
   const nextUp = openToday.find(x => !isReallyOverdue(x)) ?? openToday[0]
   const nextDue = nextUp?.due_at ? parseIstNaive(nextUp.due_at) : null
@@ -127,16 +148,12 @@ export function TodayScreen() {
         <div className="p-5 sm:p-6">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              {/* 🔴 NO GREETING AND NO NAME. The shell header above already says
-                  "Today · What needs you right now", so a "Good morning, Sathvik"
-                  underneath it spent the largest type on the screen restating the
-                  page and telling you your own name. The state of the day gets that
-                  type instead — this is a console, not a personal dashboard. */}
-              <p className="text-[19px] font-semibold leading-snug tracking-tight sm:text-[21px]">
-                {headline(openToday.filter(x => !x.is_all_day).length,
-                          overdueCount, todaysMeetings.length, done.length,
-                          openToday.filter(x => x.is_all_day).length)}
-              </p>
+          {/* 🔴 NO HEADLINE SENTENCE. It restated the pills below it in prose —
+              "4 tasks are overdue, 20 anytime and 2 more due today" above pills
+              reading 4 / 20 / 2 — so the same three numbers were on screen twice,
+              and the sentence was the copy that had to be re-worded every time a
+              count changed meaning. The pills are the honest version: shorter, and
+              each one is now a filter. */}
               {/* Next up is the ONE actionable fact, so it gets its own line and its
                   time sits under the title rather than trailing it in prose — a time
                   buried mid-sentence has to be read, where this can be glanced at. */}
@@ -188,14 +205,20 @@ export function TodayScreen() {
                   because it is the one that is a problem rather than a fact. */}
               {overdueCount > 0 && (
                 <Pill icon={<Clock className="size-3.5" />} label="overdue"
+                      active={pick === 'overdue'}
+                      onClick={() => setPick(p => p === 'overdue' ? null : 'overdue')}
                       value={overdueCount} tone="danger" />
               )}
               {criticalCount > 0 && (
                 <Pill icon={<Flame className="size-3.5" />} label="critical"
+                      active={pick === 'critical'}
+                      onClick={() => setPick(p => p === 'critical' ? null : 'critical')}
                       value={criticalCount} tone="danger" />
               )}
-              {anytime.length > 0 && (
+              {shownAnytime.length > 0 && (
                 <Pill icon={<Clock className="size-3.5" />} label="anytime"
+                      active={pick === 'anytime'}
+                      onClick={() => setPick(p => p === 'anytime' ? null : 'anytime')}
                       value={anytime.length} />
               )}
               {todaysMeetings.length > 0 && (
@@ -204,6 +227,8 @@ export function TodayScreen() {
               )}
               {done.length > 0 && (
                 <Pill icon={<CheckCircle2 className="size-3.5" />} label="done"
+                      active={pick === 'done'}
+                      onClick={() => setPick(p => p === 'done' ? null : 'done')}
                       value={done.length} tone="good" />
               )}
             </div>
@@ -255,7 +280,7 @@ export function TodayScreen() {
         ) : (
           <>
             <div className="space-y-2">
-              {timed.map(task => (
+              {shownTimed.map(task => (
                 <TaskCard
                   key={task.id} task={task}
                   busy={busyId === task.id}
@@ -268,14 +293,14 @@ export function TodayScreen() {
             </div>
 
             {/* ── ANYTIME: no particular hour, so its own group under the clock ── */}
-            {anytime.length > 0 && (
-              <div className={timed.length > 0 ? 'mt-5' : undefined}>
+            {shownAnytime.length > 0 && (
+              <div className={shownTimed.length > 0 ? 'mt-5' : undefined}>
                 <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider"
                      style={{ color: 'var(--text-subtle)' }}>
                   Anytime
                 </div>
                 <div className="space-y-2">
-                  {anytime.map(task => (
+                  {shownAnytime.map(task => (
                     <TaskCard
                       key={task.id} task={task}
                       busy={busyId === task.id}
@@ -321,18 +346,43 @@ export function TodayScreen() {
   )
 }
 
-function Pill({ icon, label, value, tone }: {
+/**
+ * A count, and a filter.
+ *
+ * Clicking one narrows the list below to just that kind; clicking it again clears
+ * it. The counts were already the honest breakdown of the day — making them
+ * actionable is the difference between "you have 20 anytime tasks somewhere below"
+ * and being able to see them.
+ *
+ * `title` carries the label for the icon-only widths, so the meaning is never lost
+ * to a tooltip-less tap target either — aria-pressed states it for a screen reader.
+ */
+function Pill({ icon, label, value, tone, active, onClick }: {
   icon: React.ReactNode; label: string; value: number
   tone?: 'good' | 'danger'
+  active?: boolean
+  onClick?: () => void
 }) {
   const color = tone === 'danger' ? '#DC2626' : tone === 'good' ? '#15803D' : 'var(--text-muted)'
   const bg = tone === 'danger' ? 'rgba(239,68,68,.1)'
            : tone === 'good' ? 'rgba(34,197,94,.1)' : 'var(--bg-sunken)'
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium"
-          style={{ background: bg, color }}>
+    <button
+      type="button" onClick={onClick}
+      aria-pressed={!!active}
+      title={`${value} ${label}`}
+      className={cx('inline-flex items-center gap-1.5 rounded-full px-2.5 py-1',
+                    'text-xs font-medium transition',
+                    onClick && 'cursor-pointer hover:opacity-80')}
+      style={{
+        background: bg,
+        color,
+        // The ACTIVE filter is ringed rather than recoloured: recolouring would
+        // fight the tone that already encodes what the pill means.
+        boxShadow: active ? `inset 0 0 0 1.5px ${color}` : undefined,
+      }}>
       {icon}<span className="tabular-nums font-semibold">{value}</span> {label}
-    </span>
+    </button>
   )
 }
 
@@ -375,37 +425,3 @@ function MeetingRow({ meeting, onOpen }: { meeting: Meeting; onOpen: () => void 
  *  Next-up used to be appended here as a second sentence. It moved into the JSX so
  *  the title and its time can be styled and put on separate lines — a function that
  *  returns a string can only ever produce prose. */
-function headline(open: number, overdue: number, meets: number, done: number,
-                  anytime = 0): string {
-  const parts: string[] = []
-
-  if (overdue > 0) {
-    parts.push(`${overdue} ${overdue === 1 ? 'task is' : 'tasks are'} overdue`)
-  }
-  if (anytime > 0) {
-    // Counted SEPARATELY, and never folded into "due today". Anytime tasks are on
-    // Today regardless of their date — they are the "whenever" pile — so calling
-    // them due today would be false, and it was: 20 tasks dated last month were
-    // being announced as due today.
-    parts.push(`${anytime} anytime`)
-  }
-  if (open - overdue > 0) {
-    const n = open - overdue
-    // "more" only reads correctly as a continuation of the overdue clause above.
-    // On its own it answers "more than what?" with nothing — which is how the first
-    // version produced the sentence "1 more due today." to someone with one task.
-    parts.push(overdue > 0
-      ? `${n} more due today`
-      : `${n} ${n === 1 ? 'task is' : 'tasks are'} due today`)
-  }
-  if (meets > 0) parts.push(`${meets} ${meets === 1 ? 'meeting' : 'meetings'}`)
-
-  if (parts.length === 0) {
-    return done > 0
-      ? `Everything due today is done — ${done} ${done === 1 ? 'task' : 'tasks'} cleared`
-      : 'Nothing is due today'
-  }
-
-  const head = parts.join(', ').replace(/, ([^,]*)$/, ' and $1')
-  return `${head[0].toUpperCase()}${head.slice(1)}`
-}
