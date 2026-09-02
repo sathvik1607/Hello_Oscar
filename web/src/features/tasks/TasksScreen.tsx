@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CheckSquare, Plus, Search, X } from 'lucide-react'
+import { CheckSquare, Search, X } from 'lucide-react'
 import { tasks as tasksApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
@@ -9,7 +9,6 @@ import { dedupeById, filterTasks } from './taskSearch'
 import { TaskCard } from './TaskCard'
 import { TaskDetail } from './TaskDetail'
 import { useUnreadComments } from './useUnreadComments'
-import { NewTaskSheet } from './NewTaskSheet'
 import { useTaskActions } from './useTaskActions'
 import {
   Button, Card, EmptyState, ErrorState, IconButton, SectionHeading, Skeleton,
@@ -26,12 +25,23 @@ import {
  *
  * 🔴 NO DELEGATED TAB. It was removed because My Team answers the same question
  * better — per person, with presence, grouped by date — and two screens listing the
- * work you handed out is two places for that list to disagree. This screen is now
- * purely YOUR OWN work: every date, filtered by status.
+ * work you handed out is two places for that list to disagree. The BROWSING list is
+ * therefore purely your own work: every date, filtered by status.
  *
  * `is_mine` is the test for
  * "mine" — the legacy `assigned_to_user_id` names only the primary assignee, so on
  * a shared task it answers wrong for everybody else.
+ *
+ * ⚠️ SEARCH IS THE EXCEPTION, and deliberately so: a query unions delegated and
+ * completed work into the pool, because "find me the task about X" is a different
+ * question from "what is on my plate" and answering it out of one quarter of the
+ * data would just look broken. Browsing stays narrow; searching goes wide.
+ *
+ * 🔴 THIS SCREEN DOES NOT CREATE TASKS. The "New task" button was removed from both
+ * places it appeared (the chip row and the empty state), so the sheet, its state and
+ * its import are gone with it. Tasks are created from Today, from My Team — where the
+ * roster selection makes the assignee unambiguous — and by asking Oscar. This screen
+ * is for finding and acting on work that exists.
  */
 
 export function TasksScreen({ target }: {
@@ -81,7 +91,6 @@ export function TasksScreen({ target }: {
    * re-render with the same object does nothing.
    */
   const handled = useRef<object | null>(null)
-  const [creating, setCreating] = useState(false)
   const [focusThread, setFocusThread] = useState(false)
   /**
    * The search query — and the one control on this screen that OVERRIDES the others.
@@ -307,38 +316,36 @@ export function TasksScreen({ target }: {
         )}
       </form>
 
-      <div className="flex items-center justify-between gap-3">
-        {/* STATUS FILTER — and it is DISABLED while a query is present, not silently
-            overruled. A search spans every status by design (that is the point of it
-            being on this screen), so leaving the chips live would let you press Open
-            and watch nothing change. Dimmed and unpressable, they say why. */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          {STATUSES.map(st => (
-            <button key={st.id} onClick={() => setStatus(st.id)}
-                    aria-pressed={!searching && status === st.id}
-                    disabled={searching}
-                    title={searching ? 'Search covers every status' : undefined}
-                    /* Larger than the usual chip. These two are the only control on
-                       the screen, so they are the primary way you steer it — not a
-                       secondary tag squeezed into a row of them. */
-                    className="rounded-full border px-4 py-2 text-[13.5px] font-medium transition disabled:opacity-45"
-                    style={!searching && status === st.id
-                      ? { background: 'var(--accent)', color: '#fff',
-                          borderColor: 'var(--accent)' }
-                      : { background: 'var(--bg)', borderColor: 'var(--border)',
-                          color: 'var(--text-muted)' }}>
-              {st.label}
-            </button>
-          ))}
-          {searching && (
-            <span className="px-1 text-[12px]" style={{ color: 'var(--text-subtle)' }}>
-              Searching every task
-            </span>
-          )}
-        </div>
-        <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
-          <Plus className="size-4" /> <span className="hidden sm:inline">New task</span>
-        </Button>
+      {/* STATUS FILTER — and it is DISABLED while a query is present, not silently
+          overruled. A search spans every status by design (that is the point of it
+          being on this screen), so leaving the chips live would let you press Open
+          and watch nothing change. Dimmed and unpressable, they say why.
+
+          The row was a justify-between pair with a "New task" button on the right;
+          with that gone the outer wrapper held one child and did nothing. */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {STATUSES.map(st => (
+          <button key={st.id} onClick={() => setStatus(st.id)}
+                  aria-pressed={!searching && status === st.id}
+                  disabled={searching}
+                  title={searching ? 'Search covers every status' : undefined}
+                  /* Larger than the usual chip. With search above them these two
+                     are the whole of the browsing UI, so they are the primary way
+                     you steer it — not a secondary tag in a row of them. */
+                  className="rounded-full border px-4 py-2 text-[13.5px] font-medium transition disabled:opacity-45"
+                  style={!searching && status === st.id
+                    ? { background: 'var(--accent)', color: '#fff',
+                        borderColor: 'var(--accent)' }
+                    : { background: 'var(--bg)', borderColor: 'var(--border)',
+                        color: 'var(--text-muted)' }}>
+            {st.label}
+          </button>
+        ))}
+        {searching && (
+          <span className="px-1 text-[12px]" style={{ color: 'var(--text-subtle)' }}>
+            Searching every task
+          </span>
+        )}
       </div>
 
       {actionError && <ErrorState error={actionError} onRetry={source.reload} />}
@@ -383,13 +390,8 @@ export function TasksScreen({ target }: {
                 icon={<CheckSquare className="size-6" />}
                 title={status === 'open' ? 'Nothing open' : 'Nothing finished yet'}
                 body={status === 'open'
-                  ? 'Every task is done or scheduled for later. Add one, or ask Oscar to.'
+                  ? 'Every task is done or scheduled for later. Ask Oscar to add one.'
                   : 'Completed and cancelled tasks will collect here.'}
-                action={status === 'open'
-                  ? <Button variant="primary" onClick={() => setCreating(true)}>
-                      <Plus className="size-4" /> New task
-                    </Button>
-                  : undefined}
               />
             )}
           </Card>
@@ -440,10 +442,6 @@ export function TasksScreen({ target }: {
         <TaskDetail task={openTask} focusThread={focusThread}
                     onClose={() => { setOpenTask(null); setFocusThread(false) }}
                     onChanged={() => { mine.reload(); source.reload() }} />
-      )}
-      {creating && (
-        <NewTaskSheet onClose={() => setCreating(false)}
-                      onCreated={() => { setCreating(false); mine.reload() }} />
       )}
     </div>
   )
