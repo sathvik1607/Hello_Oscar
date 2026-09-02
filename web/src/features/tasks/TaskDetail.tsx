@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Check, ChevronDown, Clock, Flag, Pencil, Trash2, Users, X } from 'lucide-react'
+import { Check, ChevronDown, Clock, Pencil, Trash2, Users, X } from 'lucide-react'
 import { ApiError, tasks as tasksApi } from '../../lib/api'
 import { getUser } from '../../lib/session'
-import { dueLabel, messageTime, parseIstNaive, relative, isEscalated, priorityLabel, isReallyOverdue } from '../../lib/format'
+import { dueLabel, messageTime, parseIstNaive, relative, isReallyOverdue } from '../../lib/format'
 import type { Task } from '../../lib/types'
 import { CommentComposer, CommentList, useCommentThread } from './CommentThread'
 import { NewTaskSheet } from './NewTaskSheet'
@@ -138,11 +138,11 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
           <div className="min-w-0 flex-1">
             <div className="mb-2 flex flex-wrap items-center gap-1.5">
               <Badge tone={task.status}>{STATUS_LABEL[task.status] ?? task.status}</Badge>
-              {/* Escalated only — see TaskCard. `normal` is the default and badging
-                  it says nothing. */}
-              {isEscalated(task.priority) && (
-                <Badge tone={task.priority}><Flag className="size-3" /> {priorityLabel(task.priority)}</Badge>
-              )}
+              {/* 🔴 NO PRIORITY BADGE, here or on the card. A critical task always
+                  carries a real due time (the API rejects one without a due_at) and
+                  the only consequence worth surfacing is being LATE — which the
+                  overdue badge beside this already says. The chip added a third
+                  restatement of the same fact. */}
               {isReallyOverdue(task) && !done && <Badge tone="overdue">{relative(due)}</Badge>}
             </div>
             <h2 className={cx('text-[17px] font-semibold leading-snug', done && 'line-through')}>
