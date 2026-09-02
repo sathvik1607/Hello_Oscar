@@ -36,14 +36,6 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee,
   const unread = unreadComments ?? 0
   const me = getUser()
   const due = parseIstNaive(task.due_at)
-  // The ADDED date for an anytime task. created_at is naive UTC from the app
-  // process, and parseIstNaive is the wrong reader for it — but the column shows a
-  // DAY, and a 5h30m offset only ever moves a day boundary for something created
-  // within 5.5h of midnight. Accepted: a date, not a timestamp, is being displayed.
-  const addedLabel = (() => {
-    const c = task.created_at ? new Date(task.created_at + 'Z') : null
-    return c && !Number.isNaN(c.getTime()) ? dayMonthLabel(c) : '—'
-  })()
   const done = task.status === 'completed'
   // Flutter's `_isClosedState`. In a task LIST both closed states are struck
   // through — that is what ticking something off looks like. (The CALENDAR uses
@@ -123,11 +115,17 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee,
              style={{ borderColor: 'var(--border)' }}>
           {task.is_all_day ? (
             <>
+              {/* "Anytime" plus the DUE date — the day the task is FOR, which is
+                  also what the list is sorted by. An earlier version printed the
+                  created date ("Added 29 Aug") and that answered a question nobody
+                  asks: when a task was typed is trivia, when it is meant to happen
+                  is the point. Never the 23:59 time itself, which is a placeholder
+                  and would read as a late-evening deadline. */}
               <div className="text-[10px] font-medium uppercase tracking-wide"
-                   style={{ color: 'var(--text-subtle)' }}>Added</div>
+                   style={{ color: 'var(--text-subtle)' }}>Anytime</div>
               <div className="text-[12.5px] font-semibold tabular-nums"
                    style={{ color: 'var(--text-muted)' }}>
-                {addedLabel}
+                {due ? dayMonthLabel(due) : '—'}
               </div>
             </>
           ) : (
