@@ -127,7 +127,9 @@ export function TodayScreen() {
                   page and telling you your own name. The state of the day gets that
                   type instead — this is a console, not a personal dashboard. */}
               <p className="text-[19px] font-semibold leading-snug tracking-tight sm:text-[21px]">
-                {headline(openToday.length, overdueCount, todaysMeetings.length, done.length)}
+                {headline(openToday.filter(x => !x.is_all_day).length,
+                          overdueCount, todaysMeetings.length, done.length,
+                          openToday.filter(x => x.is_all_day).length)}
               </p>
               {/* Next up is the ONE actionable fact, so it gets its own line and its
                   time sits under the title rather than trailing it in prose — a time
@@ -355,11 +357,19 @@ function MeetingRow({ meeting, onOpen }: { meeting: Meeting; onOpen: () => void 
  *  Next-up used to be appended here as a second sentence. It moved into the JSX so
  *  the title and its time can be styled and put on separate lines — a function that
  *  returns a string can only ever produce prose. */
-function headline(open: number, overdue: number, meets: number, done: number): string {
+function headline(open: number, overdue: number, meets: number, done: number,
+                  anytime = 0): string {
   const parts: string[] = []
 
   if (overdue > 0) {
     parts.push(`${overdue} ${overdue === 1 ? 'task is' : 'tasks are'} overdue`)
+  }
+  if (anytime > 0) {
+    // Counted SEPARATELY, and never folded into "due today". Anytime tasks are on
+    // Today regardless of their date — they are the "whenever" pile — so calling
+    // them due today would be false, and it was: 20 tasks dated last month were
+    // being announced as due today.
+    parts.push(`${anytime} anytime`)
   }
   if (open - overdue > 0) {
     const n = open - overdue

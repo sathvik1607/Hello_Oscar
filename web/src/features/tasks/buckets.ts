@@ -133,6 +133,16 @@ export function todayTimeline(tasks: Task[]): Task[] {
         const at = parseIstNaive(t.completed_at)
         return !!at && isToday(at)
       }
+      // 🔴 ANYTIME TASKS ALWAYS BELONG HERE, whatever their date. Their due_at is a
+      // placeholder for a DAY, not a commitment to one — so a date is the wrong
+      // thing to exclude them by, and excluding them left the ANYTIME section
+      // permanently empty (measured: 22 open anytime tasks, 0 of them dated today)
+      // while the work itself was real and unfinished. They are the "whenever"
+      // pile, and whenever includes now.
+      //
+      // Timed tasks are unaffected: still today-only, still chronological.
+      if (t.is_all_day) return true
+
       const due = parseIstNaive(t.due_at)
       return t.status === 'in_progress' || (due && isToday(due))
     })
