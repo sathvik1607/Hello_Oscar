@@ -1,17 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CheckSquare, Plus } from 'lucide-react'
+import { CheckSquare, Plus, Search, X } from 'lucide-react'
 import { tasks as tasksApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
 import type { Task } from '../../lib/types'
-import { groupByDueDate } from './buckets'
+import { byDueAsc, groupByDueDate } from './buckets'
+import { dedupeById, filterTasks } from './taskSearch'
 import { TaskCard } from './TaskCard'
 import { TaskDetail } from './TaskDetail'
 import { useUnreadComments } from './useUnreadComments'
 import { NewTaskSheet } from './NewTaskSheet'
 import { useTaskActions } from './useTaskActions'
 import {
-  Button, Card, EmptyState, ErrorState, SectionHeading, Skeleton, TruncatedNotice } from '../../ui'
+  Button, Card, EmptyState, ErrorState, IconButton, SectionHeading, Skeleton,
+  TruncatedNotice, inputCls, inputStyle } from '../../ui'
 
 /**
  * Everything on your plate, in the product's order:
@@ -81,6 +83,18 @@ export function TasksScreen({ target }: {
   const handled = useRef<object | null>(null)
   const [creating, setCreating] = useState(false)
   const [focusThread, setFocusThread] = useState(false)
+  /**
+   * The search query — and the one control on this screen that OVERRIDES the others.
+   *
+   * A search that only looked inside the active status chip would be a search of a
+   * quarter of the product: the default list is open work assigned to you, so
+   * "everything is searchable from Tasks" is only true if a query reaches past the
+   * chip, past the date sections, and past `is_mine`. While a query is present the
+   * chips are therefore disabled rather than merely ignored — a control that still
+   * looks live while having no effect is worse than one that says it is off.
+   */
+  const [query, setQuery] = useState('')
+  const searching = query.trim().length > 0
 
   const mine = useApi(s => tasksApi.mine(s), [], 'tasks:mine')
   // Fetched only when its tab is opened. Both are extra round trips against a
@@ -89,15 +103,40 @@ export function TasksScreen({ target }: {
   // One request per selected status, and only when a status is selected. `all` reuses
   // `mine`, which is already loaded.
   const byStatus = useApi(
-    s => (status === 'completed')
+    s => (status === 'completed' || searching)
       ? tasksApi.byStatus('completed', s)
       : Promise.resolve({ count: 0, tasks: [] }),
-    [status])
+    [status, searching])
+  /**
+   * Work you HANDED OUT, fetched only while a query is present.
+   *
+   * `mine()` returns what you created plus what is assigned to you, and the list is
+   * then narrowed to `is_mine` — so a task you assigned to somebody else is not in
+   * any pool this screen holds. Searching by "assigned to <name>" would have matched
+   * nothing for exactly the rows that question is about.
+   *
+   * Behind `searching` on purpose: it is a third round trip against a backend where
+   * a cold request takes seconds, and it is worthless until somebody types. The
+   * chips do not need it, and paying for it on load would slow the default view for
+   * a feature most visits never use.
+   */
+  const delegated = useApi(
+    s => searching
+      ? tasksApi.assignedByMe(s)
+      : Promise.resolve({ count: 0, tasks: [] }),
+    [searching])
 
   const source = status === 'completed' ? byStatus : mine
+  /** The requests a search depends on. Its own spinner and error state follow these
+   *  rather than `source`, which on the Open chip is already resolved and would
+   *  render "no results" over a search whose fetches are still in flight. */
+  const searchLoading = searching
+    && (delegated.loading || byStatus.loading)
+    && !(delegated.data && byStatus.data)
   const { toggle, busyId, error: actionError } = useTaskActions(source.patch, source.reload)
 
-  useLiveData(ITEM_FRAMES, () => { mine.reload(); source.reload() },
+  useLiveData(ITEM_FRAMES,
+              () => { mine.reload(); source.reload(); if (searching) delegated.reload() },
               { invalidatePrefixes: ITEM_CACHES })
 
   // See TodayScreen: `?? []` allocates per render and would defeat this memo.
@@ -180,9 +219,29 @@ export function TasksScreen({ target }: {
   /** Date sections over whatever the status filter selected. `All` shows OPEN work —
    *  a 100-row list that is 73 finished is a log, not a task list; picking Done is
    *  how you ask for those. */
-  const listed = useMemo(
-    () => (status === 'open' ? open : (byStatus.data?.tasks ?? [])),
-    [status, open, byStatus.data])
+  /**
+   * What is on screen.
+   *
+   * A QUERY REPLACES THE POOL, it does not filter the current one. Searching unions
+   * every list this screen can reach — your own work (all statuses, so cancelled and
+   * blocked are findable too), everything you delegated, and the completed list —
+   * then de-dupes by id, because those three overlap by design and a row appearing
+   * twice makes the count a lie.
+   *
+   * Sorted by due date so the sections below stay chronological; the search itself
+   * deliberately does not rank by relevance (see taskSearch.filterTasks).
+   */
+  const listed = useMemo(() => {
+    if (searching) {
+      const pool = dedupeById([
+        allMine,
+        delegated.data?.tasks,
+        byStatus.data?.tasks,
+      ])
+      return filterTasks(pool, query).sort(byDueAsc)
+    }
+    return status === 'open' ? open : (byStatus.data?.tasks ?? [])
+  }, [searching, query, allMine, delegated.data, byStatus.data, status, open])
   const sections = useMemo(() => groupByDueDate(listed), [listed])
 
 
@@ -210,19 +269,60 @@ export function TasksScreen({ target }: {
 
   return (
     <div className="space-y-5">
+      {/* ── search ───────────────────────────────────────────────────── */}
+      {/*
+        * ONE INPUT, NOT A FIELD PER COLUMN. Search by name, by who it is for, by who
+        * handed it over, by status, by the date as the row prints it — all typed into
+        * the same box, because a person searching does not know which column their
+        * memory of a task lives in. `sriram ppt` is a name and a fragment of a title
+        * and it should just work; a form with an "assignee" dropdown makes you decide
+        * that first. See taskSearch.ts for the fields covered.
+        *
+        * A plain input, not a submit form: results narrow as you type, so there is no
+        * moment where you have typed a query and not yet seen it. Enter does nothing
+        * because there is nothing left to do — but it is inside a form so a phone
+        * keyboard still shows a Search key and pressing it just closes the keyboard.
+        */}
+      <form role="search" onSubmit={e => e.preventDefault()} className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2"
+                style={{ color: 'var(--text-subtle)' }} aria-hidden />
+        <input
+          type="search"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          /* Escape clears — the fastest way back to the full list, and the shortcut
+             every search field on the platform already has. */
+          onKeyDown={e => { if (e.key === 'Escape') setQuery('') }}
+          aria-label="Search tasks"
+          placeholder="Search tasks — name, who it's for, who assigned it, status"
+          className={inputCls + ' pl-9 pr-10'}
+          style={inputStyle}
+        />
+        {searching && (
+          <div className="absolute right-1.5 top-1/2 -translate-y-1/2">
+            <IconButton label="Clear search" onClick={() => setQuery('')}>
+              <X className="size-4" />
+            </IconButton>
+          </div>
+        )}
+      </form>
+
       <div className="flex items-center justify-between gap-3">
-        {/* STATUS FILTER. The only control on this screen now that Delegated is gone —
-            and it never reorders anything: the date sections and the due-time order
-            inside them are identical whichever chip is active. */}
-        <div className="flex flex-wrap gap-1.5">
+        {/* STATUS FILTER — and it is DISABLED while a query is present, not silently
+            overruled. A search spans every status by design (that is the point of it
+            being on this screen), so leaving the chips live would let you press Open
+            and watch nothing change. Dimmed and unpressable, they say why. */}
+        <div className="flex flex-wrap items-center gap-1.5">
           {STATUSES.map(st => (
             <button key={st.id} onClick={() => setStatus(st.id)}
-                    aria-pressed={status === st.id}
+                    aria-pressed={!searching && status === st.id}
+                    disabled={searching}
+                    title={searching ? 'Search covers every status' : undefined}
                     /* Larger than the usual chip. These two are the only control on
                        the screen, so they are the primary way you steer it — not a
                        secondary tag squeezed into a row of them. */
-                    className="rounded-full border px-4 py-2 text-[13.5px] font-medium transition"
-                    style={status === st.id
+                    className="rounded-full border px-4 py-2 text-[13.5px] font-medium transition disabled:opacity-45"
+                    style={!searching && status === st.id
                       ? { background: 'var(--accent)', color: '#fff',
                           borderColor: 'var(--accent)' }
                       : { background: 'var(--bg)', borderColor: 'var(--border)',
@@ -230,6 +330,11 @@ export function TasksScreen({ target }: {
               {st.label}
             </button>
           ))}
+          {searching && (
+            <span className="px-1 text-[12px]" style={{ color: 'var(--text-subtle)' }}>
+              Searching every task
+            </span>
+          )}
         </div>
         <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
           <Plus className="size-4" /> <span className="hidden sm:inline">New task</span>
@@ -238,7 +343,7 @@ export function TasksScreen({ target }: {
 
       {actionError && <ErrorState error={actionError} onRetry={source.reload} />}
 
-      {source.loading && !source.data && <Skeleton rows={5} />}
+      {((source.loading && !source.data) || searchLoading) && <Skeleton rows={5} />}
       {source.error && !source.data && (
         <ErrorState error={source.error} onRetry={source.reload} />
       )}
@@ -259,24 +364,46 @@ export function TasksScreen({ target }: {
         * Both now follow `source` (the request feeding this filter) and `listed`
         * (the rows actually about to be drawn).
         */}
-      {!!source.data && (
+      {!!source.data && !searchLoading && (
         listed.length === 0 ? (
           <Card>
-            <EmptyState
-              icon={<CheckSquare className="size-6" />}
-              title={status === 'open' ? 'Nothing open' : 'Nothing finished yet'}
-              body={status === 'open'
-                ? 'Every task is done or scheduled for later. Add one, or ask Oscar to.'
-                : 'Completed and cancelled tasks will collect here.'}
-              action={status === 'open'
-                ? <Button variant="primary" onClick={() => setCreating(true)}>
-                    <Plus className="size-4" /> New task
-                  </Button>
-                : undefined}
-            />
+            {/* A search that found nothing is NOT an empty task list, and offering
+                "New task" there would be answering a question nobody asked — you
+                were looking for something that exists, not trying to add one. It
+                says what was searched, so a typo is the obvious next thought. */}
+            {searching ? (
+              <EmptyState
+                icon={<Search className="size-6" />}
+                title="No tasks match"
+                body={`Nothing found for "${query.trim()}". Searches cover the name, who it's for, who assigned it, the status and the date.`}
+                action={<Button onClick={() => setQuery('')}>Clear search</Button>}
+              />
+            ) : (
+              <EmptyState
+                icon={<CheckSquare className="size-6" />}
+                title={status === 'open' ? 'Nothing open' : 'Nothing finished yet'}
+                body={status === 'open'
+                  ? 'Every task is done or scheduled for later. Add one, or ask Oscar to.'
+                  : 'Completed and cancelled tasks will collect here.'}
+                action={status === 'open'
+                  ? <Button variant="primary" onClick={() => setCreating(true)}>
+                      <Plus className="size-4" /> New task
+                    </Button>
+                  : undefined}
+              />
+            )}
           </Card>
         ) : (
           <div className="space-y-7">
+            {/* How many matched. Without it a filtered list looks like the whole list
+                — and on this screen the whole list is hundreds of rows, so "did the
+                search actually run" is a real question. */}
+            {searching && (
+              <div className="text-[12.5px]" style={{ color: 'var(--text-subtle)' }}>
+                {listed.length} {listed.length === 1 ? 'task' : 'tasks'} matching
+                {' '}<span style={{ color: 'var(--text-muted)' }}>{query.trim()}</span>
+              </div>
+            )}
             {sections.map(sec => (
               <section key={sec.key}>
                 {/* Overdue is the only heading that is a problem rather than a fact, so it

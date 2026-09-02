@@ -160,18 +160,23 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
             when the thread is short — see the mt-auto on it. */}
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-4">
           {/* ── description ─────────────────────────────────────────── */}
-          <div className="mb-1 text-[11px] font-semibold uppercase tracking-[.1em]"
-               style={{ color: 'var(--text-subtle)' }}>
-            Description
-          </div>
-          {task.description?.trim() ? (
-            <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-              <Linkify text={task.description} />
-            </p>
-          ) : (
-            <p className="text-sm italic" style={{ color: 'var(--text-subtle)' }}>
-              No description.
-            </p>
+          {/* HEADING AND BODY TOGETHER, or neither.
+              The heading used to sit outside this conditional, so a task with no
+              description still rendered "DESCRIPTION / No description." — two lines
+              of furniture telling you about the absence of content, directly above
+              the Details toggle. Most tasks are a title and a time; that made the
+              blank state the most common thing on the sheet. Nothing is the honest
+              rendering of nothing. */}
+          {!!task.description?.trim() && (
+            <>
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-[.1em]"
+                   style={{ color: 'var(--text-subtle)' }}>
+                Description
+              </div>
+              <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+                <Linkify text={task.description} />
+              </p>
+            </>
           )}
 
           {/* ── details, collapsed ──────────────────────────────────── */}
@@ -179,7 +184,11 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
             <>
               <button onClick={() => setShowDetails(v => !v)}
                       aria-expanded={showDetails}
-                      className="mt-3.5 flex items-center gap-1 text-[12px] font-medium"
+                      /* The top margin separates this from the DESCRIPTION above —
+                         so with no description there is nothing to separate from and
+                         it would render as a stray gap under the header. */
+                      className={cx('flex items-center gap-1 text-[12px] font-medium',
+                                    !!task.description?.trim() && 'mt-3.5')}
                       style={{ color: 'var(--text-subtle)' }}>
                 {showDetails ? 'Hide' : 'Details'}
                 <ChevronDown className={cx('size-3.5 transition-transform',
