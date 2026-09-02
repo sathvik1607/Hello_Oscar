@@ -174,7 +174,13 @@ export function TeamScreen() {
           : `Done · ${dayLabel(due)}`
         find(key, label, 4).tasks.push(t)
       }
-      else if (!due)            find('none', 'No date', 3).tasks.push(t)
+      // 🔴 UNDATED WORK IS NOT SHOWN. It had its own "No date" group, which was a
+      // place tasks went to be forgotten: nothing about a row with no date says
+      // when it matters, so the group could only ever grow. Dropped rather than
+      // folded into a dated group, because guessing a date for someone else's task
+      // is worse than leaving it out of this view — it is still on Tasks and in
+      // that member's own list.
+      else if (!due)            continue
       else if (isPast(due) && !isToday(due))
                                 find('overdue', 'Overdue', 0).tasks.push(t)
       else if (isToday(due))    find('today', 'Today', 1).tasks.push(t)
