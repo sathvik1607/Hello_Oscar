@@ -244,3 +244,10 @@ export const priorityLabel = (p: string | null | undefined) =>
 export const isReallyOverdue = (t: {
   is_overdue?: boolean; is_all_day?: boolean
 }) => !!t.is_overdue && !t.is_all_day
+
+/** "27 Aug" — day and month, no weekday and no year. For the ADDED column on an
+ *  anytime task, where the year is noise and the weekday does not fit the width. */
+const fmtDayMonth = new Intl.DateTimeFormat('en-IN', {
+  day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata',
+})
+export const dayMonthLabel = (d: Date) => fmtDayMonth.format(d)

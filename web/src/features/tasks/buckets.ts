@@ -52,30 +52,25 @@ export const isActive = (t: Task) =>
 /** Earliest first, undated last. An undated task sorted as though it were due at
  *  the epoch would sit above genuinely urgent work. */
 /**
- * Ordering, in three tiers.
+ * Ordering: CHRONOLOGICAL, then anytime.
  *
- * 1. CRITICAL FIRST. Priority is scheduler BEHAVIOUR here, not decoration — a
- *    critical task is the only kind that gets a reminder at all, so it is the only
- *    kind with a real consequence for being missed. Sorting purely by time buried
- *    it under whatever happened to be scheduled earlier.
+ * 🔴 Deliberately NOT priority-first. A critical-first sort was tried and reverted:
+ * it reads as wrong on a day view, because a list of times that jumps 3:30pm →
+ * 5:00pm → 9:00am is no longer a timeline, and a timeline is what the day view is
+ * for. Criticals are already distinguishable — the API refuses a critical without a
+ * due_at, so they always carry a real clock time, and lateness turns that time red.
  *
- * 2. ANYTIME (all-day) LAST, and kept together. Its due_at is a 23:59 placeholder
- *    rather than a chosen time, so sorting it by that value would drop it at the
- *    bottom of the *timed* run and imply a late-evening commitment nobody made.
- *    Treating it as its own group says the honest thing: some time today, no
- *    particular hour.
+ * ANYTIME (all-day) tasks sort LAST, together. Their due_at is a 23:59 placeholder
+ * rather than a chosen hour, so ordering them by it would place them at the end of
+ * the timed run and imply a late-evening commitment nobody made. As their own group
+ * the list says the honest thing: some time that day, no particular hour.
  *
- * 3. Then by time, then by id — the id tiebreak keeps an undated list from
- *    reshuffling on every refetch, which reads as data changing when nothing has.
+ * Ties break on id so a list does not reshuffle between refetches — visible
+ * reordering reads as data changing when nothing has.
  */
-const isCritical = (t: Task) => t.priority === 'critical' || t.priority === 'high'
 const isAnytime = (t: Task) => !!t.is_all_day
 
 export function byDueAsc(a: Task, b: Task): number {
-  // Critical outranks everything, including an earlier normal task.
-  if (isCritical(a) !== isCritical(b)) return isCritical(a) ? -1 : 1
-
-  // Anytime sinks below every timed task in the same priority tier.
   if (isAnytime(a) !== isAnytime(b)) return isAnytime(a) ? 1 : -1
   if (isAnytime(a) && isAnytime(b)) return a.id - b.id
 

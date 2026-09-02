@@ -1,8 +1,10 @@
 import {
-  AlertCircle, ArrowLeft, ArrowRight, Check, Clock, GitBranch, MessageSquare, Users,
+  AlertCircle, ArrowLeft, ArrowRight, Check, GitBranch, MessageSquare, Users,
 } from 'lucide-react'
 import type { Task } from '../../lib/types'
-import { dueLabel, parseIstNaive, relative, isEscalated, priorityLabel, isReallyOverdue } from '../../lib/format'
+import {
+  dayMonthLabel, isReallyOverdue, parseIstNaive, timeLabel,
+} from '../../lib/format'
 import { getUser } from '../../lib/session'
 import { Badge, Card, STATUS_LABEL, cx } from '../../ui'
 
@@ -34,6 +36,14 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee,
   const unread = unreadComments ?? 0
   const me = getUser()
   const due = parseIstNaive(task.due_at)
+  // The ADDED date for an anytime task. created_at is naive UTC from the app
+  // process, and parseIstNaive is the wrong reader for it — but the column shows a
+  // DAY, and a 5h30m offset only ever moves a day boundary for something created
+  // within 5.5h of midnight. Accepted: a date, not a timestamp, is being displayed.
+  const addedLabel = (() => {
+    const c = task.created_at ? new Date(task.created_at + 'Z') : null
+    return c && !Number.isNaN(c.getTime()) ? dayMonthLabel(c) : '—'
+  })()
   const done = task.status === 'completed'
   // Flutter's `_isClosedState`. In a task LIST both closed states are struck
   // through — that is what ticking something off looks like. (The CALENDAR uses
@@ -92,6 +102,37 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee,
           {done && <Check className="size-3 text-white" strokeWidth={3.5} />}
         </button>
 
+        {/* ── WHEN: its own left column, with a divider ─────────────────
+            The time was previously buried in a meta row under the title, beside a
+            priority chip and a clock icon. Pulled out to the left because it is the
+            single most scanned value on the card — the question is "what is next",
+            and a column of aligned times answers that at a glance where inline text
+            does not.
+
+            An ANYTIME task has no time to put here (its due_at is a 23:59
+            placeholder, not a chosen hour), so it shows when it was ADDED instead —
+            the honest alternative, and it stops the column looking broken or
+            implying a late-evening deadline. */}
+        <div className="w-[68px] shrink-0 border-r pr-3 text-right"
+             style={{ borderColor: 'var(--border)' }}>
+          {task.is_all_day ? (
+            <>
+              <div className="text-[10px] font-medium uppercase tracking-wide"
+                   style={{ color: 'var(--text-subtle)' }}>Added</div>
+              <div className="text-[12.5px] font-semibold tabular-nums"
+                   style={{ color: 'var(--text-muted)' }}>
+                {addedLabel}
+              </div>
+            </>
+          ) : (
+            <div className="text-[13px] font-bold tabular-nums leading-tight"
+                 style={isReallyOverdue(task) && !terminal
+                   ? { color: '#DC2626' } : { color: 'var(--text)' }}>
+              {due ? timeLabel(due) : '—'}
+            </div>
+          )}
+        </div>
+
         <button onClick={onOpen} className="min-w-0 flex-1 text-left">
           {/* ── title row: risk, title, status ────────────────────────── */}
           <div className="flex items-start gap-2">
@@ -107,27 +148,16 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee,
             <Badge tone={task.status}>{STATUS_LABEL[task.status] ?? task.status}</Badge>
           </div>
 
-          {/* ── meta row: priority, when, sub-tasks ───────────────────── */}
+          {/* ── meta row: sub-tasks, sharing, comments ─────────────────
+              🔴 NO PRIORITY LABEL. A "critical" chip on every critical card is
+              noise: critical REQUIRES a time (the API rejects one without a due_at)
+              and criticals already sort to the top, so the chip repeats what the
+              position and the time column have already said. The one thing worth
+              flagging is being LATE, which the time turns red for.
+
+              The inline time is gone too — it lives in the left column now. Two
+              time labels on one card was the original problem. */}
           <div className="mt-1.5 flex items-center gap-2">
-            {/* Only an escalated task gets a badge. `!== 'medium'` was the old test
-                and it is now true for EVERY task — the backend stores `normal`, so
-                every card grew a grey, meaningless "normal" chip. */}
-            {isEscalated(task.priority) && (
-              <Badge tone={task.priority}>{priorityLabel(task.priority)}</Badge>
-            )}
-            {/* Overdue replaces the plain due time rather than sitting beside it —
-                two time labels on one row is noise, and "3h overdue" already
-                contains everything "6:30 pm" said. */}
-            <span className="flex min-w-0 items-center gap-1 text-xs"
-                  style={isReallyOverdue(task) && !terminal
-                    ? { color: '#DC2626', fontWeight: 600 }
-                    : { color: 'var(--text-subtle)' }}>
-              <Clock className="size-3 shrink-0" />
-              <span className="truncate tabular-nums">
-                {isReallyOverdue(task) && !terminal ? relative(due)
-                  : due ? dueLabel(due) : 'No time set'}
-              </span>
-            </span>
             {shared && (
               <Badge tone="neutral">
                 <Users className="size-3" />
