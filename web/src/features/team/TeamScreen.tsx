@@ -80,8 +80,25 @@ export function TeamScreen() {
    * against the backend now in use.
    */
   useEffect(() => {
-    if (identityIsStale(members.data)) signOutStaleIdentity()
-  }, [members.data])
+    // Two independent signals, because neither alone is sufficient.
+    //
+    // (1) The ROSTER says our id is not on our own team. Authoritative when it has
+    //     loaded — but `members` carries no cache key, so `.data` is null on the
+    //     first paint and this cannot be the only trigger.
+    //
+    // (2) 🔴 The member-tasks call actually 404'd "Member not in this team". This is
+    //     the signal that matters: it is the request that FAILED, it is what puts
+    //     the red card on screen, and it needs nothing else to have loaded first.
+    //     Matched on the backend's own wording (main.py raises exactly this), and
+    //     guarded on `selected === me.id` so a lead clicking a teammate who really
+    //     did leave the team is NOT signed out — that 404 is legitimate and about
+    //     somebody else.
+    const rosterSaysNo = identityIsStale(members.data)
+    const ownTasks404 = !!memberTasks.error
+      && /member not in this team/i.test(memberTasks.error)
+      && selected === me?.id
+    if (rosterSaysNo || ownTasks404) signOutStaleIdentity()
+  }, [members.data, memberTasks.error, selected, me?.id])
 
   // Live presence, overlaid on the fetched roster — see lib/presence.ts.
   const live = usePresence()

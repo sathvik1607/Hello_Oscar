@@ -191,6 +191,18 @@ const K_SIGNOUT_REASON = 'oscar.web.signout_reason'
 export function signOutStaleIdentity() {
   try { localStorage.setItem(K_SIGNOUT_REASON, 'stale_identity') } catch { /* private mode */ }
   signOut()
+  // 🔴 A RELOAD, NOT JUST A SIGN-OUT — and this is the part that is easy to get
+  // wrong. Signing out clears storage but does NOT re-download the JavaScript, so
+  // a tab opened before a deploy keeps running the OLD bundle with the OLD backend
+  // URL compiled into it. Sign out, sign in, and that same stale bundle points at
+  // the same wrong host: the user loops, doing exactly what they were told, and it
+  // never works. Observed with a tester who would not reload the page.
+  //
+  // location.reload() re-requests index.html, which names the CURRENT asset
+  // hashes, so the new code arrives without the user knowing anything about
+  // bundles. Deferred a tick so signOut()'s listeners run and storage is flushed
+  // before the document is torn down.
+  setTimeout(() => location.reload(), 0)
 }
 
 /** Read AND clear the reason — one-shot, so it explains the redirect that just
