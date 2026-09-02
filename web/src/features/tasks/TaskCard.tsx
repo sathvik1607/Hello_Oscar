@@ -36,6 +36,15 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee,
   const unread = unreadComments ?? 0
   const me = getUser()
   const due = parseIstNaive(task.due_at)
+  // When the task was ADDED. created_at is naive UTC from the app process, so it
+  // is read as UTC rather than through parseIstNaive (which assumes IST). Only a
+  // DAY is displayed, and a 5h30m offset can only move a day boundary for
+  // something created within 5.5h of midnight — accepted, since this is a date and
+  // not a timestamp.
+  const addedLabel = (() => {
+    const c = task.created_at ? new Date(task.created_at + 'Z') : null
+    return c && !Number.isNaN(c.getTime()) ? dayMonthLabel(c) : '—'
+  })()
   const done = task.status === 'completed'
   // Flutter's `_isClosedState`. In a task LIST both closed states are struck
   // through — that is what ticking something off looks like. (The CALENDAR uses
@@ -115,16 +124,24 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee,
              style={{ borderColor: 'var(--border)' }}>
           {task.is_all_day ? (
             <>
-              {/* Just the DATE — the day the task is for.
-                  No "Anytime" word: the section heading above the group already
-                  says it, and repeating it on every card is noise. No time either,
-                  ever: the stored 23:59 is a placeholder, not a chosen hour, and
-                  printing it would read as a late-evening deadline. And not the
-                  CREATED date, which an earlier version showed — when a task was
-                  typed is trivia; when it is meant to happen is the point. */}
+              {/* The ADDED date, matching the Flutter app.
+                  Two clients showing different dates for the same row is worse than
+                  either choice being imperfect — someone comparing phone and browser
+                  would reasonably conclude one of them is broken. Flutter has only a
+                  created-date concept for these, so the web app follows rather than
+                  diverging, and Flutter is the place to change if this should become
+                  the due date on both.
+                  ⚠️ Note it is NOT the day the task is for: measured on real data,
+                  all 22 anytime tasks have a created date different from their due
+                  date, and the SORT still uses due_at. So this column deliberately
+                  does not explain the row's position.
+                  Never the time: the stored 23:59 is a placeholder, not a chosen
+                  hour, and printing it would read as a late-evening deadline. */}
+              <div className="text-[10px] font-medium uppercase tracking-wide"
+                   style={{ color: 'var(--text-subtle)' }}>Added</div>
               <div className="text-[12.5px] font-semibold tabular-nums"
                    style={{ color: 'var(--text-muted)' }}>
-                {due ? dayMonthLabel(due) : '—'}
+                {addedLabel}
               </div>
             </>
           ) : (
