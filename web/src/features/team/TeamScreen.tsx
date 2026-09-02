@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Circle, Users } from 'lucide-react'
+import { Circle, Plus, Users } from 'lucide-react'
 import { team as teamApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
@@ -11,11 +11,12 @@ import { resolvePresence, usePresence } from '../../lib/presence'
 import type { Task } from '../../lib/types'
 import { Avatar } from '../../shell/AppShell'
 import { byDueAsc } from '../tasks/buckets'
+import { NewTaskSheet } from '../tasks/NewTaskSheet'
 import { TaskCard } from '../tasks/TaskCard'
 import { TaskDetail } from '../tasks/TaskDetail'
 import { useUnreadComments } from '../tasks/useUnreadComments'
 import {
-  Card, EmptyState, ErrorState, SectionHeading, Skeleton, cx,
+  Button, Card, EmptyState, ErrorState, SectionHeading, Skeleton, cx,
 } from '../../ui'
 
 /**
@@ -48,6 +49,7 @@ export function TeamScreen() {
    */
   const [selected, setSelected] = useState<number | null>(null)
   const [openTask, setOpenTask] = useState<Task | null>(null)
+  const [creating, setCreating] = useState(false)
   // Unread comments per task — the badge and the glow on each card, and the
   // clear when one is opened. See useUnreadComments: derived from the bell rows
   // because no per-viewer read state exists on pa_task_comments.
@@ -320,11 +322,29 @@ export function TeamScreen() {
 
       {/* ── tasks ────────────────────────────────────────────────────── */}
       <section>
-        <SectionHeading count={activeShown.length}>
-          {/* Whose work is shown, and nothing else. Was
-              "ALUMNX AI LABS · PROJECT TASKS" — the team name for a third time,
-              plus a column name from our schema. */}
-          {headingName ? `${headingName}'s tasks` : 'Everyone'}
+        {/* Just "Tasks".
+            The heading used to name whose work was shown ("Your tasks", "Sathvik's
+            tasks", "Everyone") — which restated the roster selection sitting a few
+            centimetres above it, where it is already the highlighted card. A heading
+            that echoes the control above it is not a label, it is a second copy of
+            one, and it changed under you as you tapped around.
+            The button carries the name instead, because there it is NEW information:
+            it says who the task will be for. */}
+        <SectionHeading
+          count={activeShown.length}
+          action={
+            <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+              <Plus className="size-4" />
+              {/* Names the person only when one is picked, and never yourself —
+                  "New task for you" on your own row is the same noise the heading
+                  was. Workspace selected = a plain new task. */}
+              {selectedMember && selectedMember.user_id !== me?.id
+                ? `New task for ${selectedMember.name?.split(' ')[0] ?? 'them'}`
+                : 'New task'}
+            </Button>
+          }
+        >
+          Tasks
         </SectionHeading>
 
         {(projects.loading || memberTasks.loading) && <Skeleton rows={3} />}
@@ -345,6 +365,19 @@ export function TeamScreen() {
               body={selectedMember
                 ? 'Tasks assigned to them will show here.'
                 : 'Project tasks shared across the workspace appear here.'}
+              /* Desktop only, same reasoning as Today: on a phone this sits a short
+                 scroll below the identical button in the section header, so both
+                 would render as two calls to action for one thing. On desktop they
+                 are far apart — header top-right versus the middle of an empty
+                 card — and an empty list is exactly when you want to add to it. */
+              action={<div className="hidden sm:block">
+                <Button variant="primary" onClick={() => setCreating(true)}>
+                  <Plus className="size-4" />
+                  {selectedMember && selectedMember.user_id !== me?.id
+                    ? `New task for ${selectedMember.name?.split(' ')[0] ?? 'them'}`
+                    : 'New task'}
+                </Button>
+              </div>}
             />
           </Card>
         )}
@@ -382,6 +415,24 @@ export function TeamScreen() {
       {openTask && (
         <TaskDetail task={openTask} onClose={() => setOpenTask(null)}
                     onChanged={() => { projects.reload(); memberTasks.reload() }} />
+      )}
+      {creating && (
+        /* 🔴 THE PICKED MEMBER IS THE ASSIGNEE. The roster selection is the whole
+           intent of pressing this button here — making you re-pick the same person
+           inside the form is a step that can only be got wrong, and getting it
+           wrong sends work to the wrong person.
+           No seedDate: unlike Today, this screen has no single day in view (it
+           groups across Overdue/Today/Tomorrow/…), so the form's own default is
+           the honest starting point.
+           A task for someone else lands on the team board automatically —
+           NewTaskSheet forces is_project when the assignee is not you. */
+        <NewTaskSheet
+          seedAssignees={selected ? [selected] : null}
+          onClose={() => setCreating(false)}
+          onCreated={() => {
+            setCreating(false)
+            projects.reload(); memberTasks.reload()
+          }} />
       )}
     </div>
   )

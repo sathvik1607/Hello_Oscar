@@ -24,11 +24,16 @@ import type { Task } from '../../lib/types'
  * timezone, so sending an ISO string with a Z would land the task hours off — and
  * a due time in the past is born overdue, which fires a reminder immediately.
  */
-export function NewTaskSheet({ onClose, onCreated, task, seedDate }: {
+export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedAssignees }: {
   onClose: () => void
   onCreated: () => void
   /** Present = edit that task. Absent = create a new one. */
   task?: Task | null
+  /** Who to pre-select, when the opening screen already has a person in view — My
+   *  Team with a member picked. Same reasoning as `seedDate`: the filter you are
+   *  looking at IS the intent, and making you re-pick it is a step that can only go
+   *  wrong. Ignored when editing, which seeds from the task's own roster. */
+  seedAssignees?: number[] | null
   /** "YYYY-MM-DD" (IST) to open the date field on. Passed by a screen that already
    *  has a day in view — Today, or a picked day on the calendar — so a task created
    *  from there lands on the day the user was looking at rather than silently on
@@ -66,6 +71,9 @@ export function NewTaskSheet({ onClose, onCreated, task, seedDate }: {
     const roster = (task?.assignees ?? []).map(a => a.user_id).filter(Boolean)
     if (roster.length) return roster
     if (task) return task.assigned_to_user_id ? [task.assigned_to_user_id] : []
+    // A screen that already has somebody selected passes them, and that wins over
+    // the self default — on My Team with a member picked, the task is for THEM.
+    if (seedAssignees?.length) return seedAssignees
     // 🔴 A NEW TASK STARTS ASSIGNED TO YOU, VISIBLY. An empty list already MEANT
     // self-assigned — create_item self-assigns when no assignee is given — but
     // nothing on the form said so: every teammate chip sat unselected, so the
