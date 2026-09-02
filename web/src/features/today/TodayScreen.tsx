@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { CalendarClock, CheckCircle2, Clock, Plus } from 'lucide-react'
+import { CalendarClock, Flame, CheckCircle2, Clock, Plus } from 'lucide-react'
 import { meetings as meetingsApi, tasks as tasksApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
@@ -103,6 +103,12 @@ export function TodayScreen() {
   const nextUp = openToday.find(x => !isReallyOverdue(x)) ?? openToday[0]
   const nextDue = nextUp?.due_at ? parseIstNaive(nextUp.due_at) : null
   const overdueCount = openToday.filter(x => isReallyOverdue(x)).length
+  // Critical is the only tier the scheduler reminds anybody about, so it is the
+  // only priority worth a number. Legacy `high` counts too — old rows still carry
+  // it and nothing rewrites them.
+  const criticalCount = useMemo(
+    () => openToday.filter(x => x.priority === 'critical' || x.priority === 'high').length,
+    [openToday])
 
   if (t.loading && !t.data) {
     return (
@@ -173,16 +179,24 @@ export function TodayScreen() {
 
           {(timeline.length > 0 || done.length > 0 || todaysMeetings.length > 0) && (
             <div className="mt-4 flex flex-wrap gap-2 sm:mt-5">
-              {/* OPEN rows, not every row — `timeline` includes today's completed
-                  tasks now, and counting those as "to do" is a lie the "done" pill
-                  right beside it immediately contradicts. */}
-              {openToday.length > 0 && (
-                <Pill icon={<Clock className="size-3.5" />} label="to do"
-                      value={openToday.length} />
-              )}
+              {/* CRITICAL / ANYTIME / DONE — the three that actually differ in
+                  kind. A single "to do" total is the one number that cannot be
+                  acted on: it lumped six scheduled tasks together with twenty
+                  undated ones and answered no question anybody has. Critical is the
+                  only tier the scheduler reminds you about, anytime is work with no
+                  hour attached, and done is progress. Overdue stays, ahead of them,
+                  because it is the one that is a problem rather than a fact. */}
               {overdueCount > 0 && (
                 <Pill icon={<Clock className="size-3.5" />} label="overdue"
                       value={overdueCount} tone="danger" />
+              )}
+              {criticalCount > 0 && (
+                <Pill icon={<Flame className="size-3.5" />} label="critical"
+                      value={criticalCount} tone="danger" />
+              )}
+              {anytime.length > 0 && (
+                <Pill icon={<Clock className="size-3.5" />} label="anytime"
+                      value={anytime.length} />
               )}
               {todaysMeetings.length > 0 && (
                 <Pill icon={<CalendarClock className="size-3.5" />} label="meetings"
@@ -213,7 +227,11 @@ export function TodayScreen() {
 
       {/* ── the timeline ─────────────────────────────────────────────── */}
       <section>
-        <SectionHeading count={timeline.length}>Your day</SectionHeading>
+        {/* No count. `timeline` includes the anytime pile, which is not "today's
+            work" in any sense a number next to this heading would convey — it read
+            26 while only 6 things were actually scheduled. The pills above break it
+            down honestly; a single total here could only mislead. */}
+        <SectionHeading>Your day</SectionHeading>
         {timeline.length === 0 ? (
           <Card>
             <EmptyState
