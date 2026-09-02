@@ -221,7 +221,12 @@ export function TeamScreen() {
     <div className="space-y-7">
       {/* ── roster ───────────────────────────────────────────────────── */}
       <section>
-        <SectionHeading count={roster.length}>{me.team_name ?? 'Team'}</SectionHeading>
+        {/* "Members", not the team name. The name was on screen THREE times — this
+            heading, the workspace card below it, and the task heading further down
+            — which is how "ALUMNX AI LABS / ALUMNX AI LABS / ALUMNX AI LABS ·
+            PROJECT TASKS" ended up reading as three different things. The team name
+            belongs in the header, not repeated down the page. */}
+        <SectionHeading count={roster.length}>Members</SectionHeading>
         {members.loading && !members.data && <Skeleton rows={2} />}
         {members.error && <ErrorState error={members.error} onRetry={members.reload} />}
 
@@ -251,7 +256,10 @@ export function TeamScreen() {
                 {me.team_name ?? 'Workspace'}
               </div>
               <div className="truncate text-[11.5px]" style={{ color: 'var(--text-subtle)' }}>
-                Everyone's project tasks
+                {/* "project tasks" is our own database word (pa_items.is_project) and
+                    means nothing to a reader. What the card actually selects is
+                    everyone's work at once. */}
+                Everyone
               </div>
             </div>
           </button>
@@ -298,8 +306,10 @@ export function TeamScreen() {
       {/* ── tasks ────────────────────────────────────────────────────── */}
       <section>
         <SectionHeading count={activeShown.length}>
-          {headingName ? `${headingName} tasks`
-            : `${me.team_name ?? 'Workspace'} · project tasks`}
+          {/* Whose work is shown, and nothing else. Was
+              "ALUMNX AI LABS · PROJECT TASKS" — the team name for a third time,
+              plus a column name from our schema. */}
+          {headingName ? `${headingName}'s tasks` : 'Everyone'}
         </SectionHeading>
 
         {(projects.loading || memberTasks.loading) && <Skeleton rows={3} />}
