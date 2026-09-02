@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ArrowRight, KeyRound, Mail } from 'lucide-react'
 import { ApiError, auth } from '../../lib/api'
-import { baseIsLocked, getBase, setBase, signIn, takeSignOutReason } from '../../lib/session'
+import {
+  baseIsLocked, getBase, markUpdatedReload, setBase, signIn, takeSignOutReason,
+} from '../../lib/session'
 import { Logo } from '../../shell/AppShell'
 import {
   Button, Card, Field, cx, inputCls, inputStyle,
@@ -21,22 +23,58 @@ import {
  * a product decision rather than a missing screen. Joining a workspace by invite
  * code is offered after sign-in, where the account already exists.
  */
-export function AuthScreen() {
+export function AuthScreen({ updated = false }: { updated?: boolean }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   // Explains an automatic sign-out that just happened, so being bounced here does
   // not read as a bug. One-shot: read and cleared, so it never shows on a later visit.
-  const [notice] = useState<string | null>(() =>
-    takeSignOutReason() === 'stale_identity'
-      ? 'You were signed out because this browser was pointed at a different ' +
-        'backend, where your account has a different id. Please sign in again.'
-      : null)
+  /**
+   * One line, in the user's terms.
+   *
+   * 🔴 No build ids, no mention of caches, tabs, bundles or backends. Those were in
+   * an earlier version of this copy and they are developer facts: a person signing
+   * in does not know what a bundle is, and naming one turns a routine update into
+   * something that looks like it needs investigating. All they need is why they are
+   * seeing a login screen and what to do — sign in.
+   *
+   * Two sources, same sentence, because the user's situation is identical either
+   * way: `updated` (this tab is running an older version) and a stale-identity
+   * sign-out. Distinguishing them would be a distinction only we care about.
+   */
+  const [notice] = useState<string | null>(() => {
+    const signedOut = takeSignOutReason() === 'stale_identity'
+    return updated || signedOut
+      ? 'We’ve updated Oscar. Please sign in again to continue.'
+      : null
+  })
   const [err, setErr] = useState<string | null>(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [baseUrl, setBaseUrl] = useState(getBase())
 
   useEffect(() => { document.title = 'Sign in · Oscar' }, [])
+
+  /**
+   * 🔴 A stale tab reloads the moment it lands here — BEFORE the user types.
+   *
+   * Reaching this screen does not re-download anything: the tab is still running
+   * the older code, backend URL included. Without this, signing in would return the
+   * user to the same outdated app and the notice would greet them again — a loop
+   * they cannot escape by following instructions.
+   *
+   * Done on ARRIVAL rather than on submit, because reloading after someone has
+   * typed their password throws that password away. On arrival there is nothing to
+   * lose, the reload is invisible (they see a login screen either way), and the
+   * form they then fill in belongs to the current version.
+   *
+   * The one-shot reason is planted first, so the fresh page shows the notice it
+   * would otherwise lose in the reload.
+   */
+  useEffect(() => {
+    if (!updated) return
+    markUpdatedReload()
+    location.reload()
+  }, [updated])
 
   const submit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
@@ -54,6 +92,7 @@ export function AuthScreen() {
     // the bundle. getBase() now prefers the build, and this no longer writes a key
     // that would need purging.
     if (!baseIsLocked()) setBase(baseUrl)
+
     try {
       const r = await auth.login(email.trim(), password)
       if (!r.token) {

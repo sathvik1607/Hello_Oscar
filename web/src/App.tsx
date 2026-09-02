@@ -10,7 +10,6 @@ import { TodayScreen } from './features/today/TodayScreen'
 import { VoiceProvider } from './features/voice/VoiceProvider'
 import { Spinner } from './ui'
 import { checkFreshness, watchBuildMismatch } from './lib/freshness'
-import { StaleVersionGate } from './shell/StaleVersionGate'
 
 /**
  * Root. Two states — signed out and signed in — and a path router.
@@ -116,7 +115,8 @@ export default function App() {
   }, [])
 
   /**
-   * Stale-code detection — see StaleVersionGate for why this BLOCKS rather than nags.
+   * Stale-code detection. Sends the tab to the login screen with a one-line
+   * notice — see the `staleVersion` branch below.
    *
    * Two independent detectors, either sufficient:
    *  · X-App-Version on any API response — immediate and free, since it rides
@@ -212,12 +212,19 @@ export default function App() {
   }, [])
 
   /**
-   * 🔴 BEFORE the auth branch, so it covers the signed-OUT state too. A stale tab
-   * sitting on the login screen is the worst case of all: the old bundle posts to a
-   * backend that may not exist, the failure reads as a wrong password, and the user
-   * retries forever. That is exactly the loop this exists to break.
+   * A stale tab goes to the LOGIN screen with a note on it — not to a full-screen
+   * card of its own.
+   *
+   * 🔴 A blocking interstitial was the first design and it was too heavy. It
+   * interrupts with something the user did not ask about and cannot act on except
+   * by obeying it, and for a routine deploy that reads as "the app is broken". The
+   * login screen is somewhere people already understand, so putting the notice
+   * there costs no extra step: they were going to sign in anyway.
+   *
+   * `updated` is passed so AuthScreen can show one line instead of the app
+   * inventing a new surface for it.
    */
-  if (staleVersion) return <StaleVersionGate />
+  if (staleVersion) return <AuthScreen updated />
 
   if (!signedIn) return <AuthScreen />
 

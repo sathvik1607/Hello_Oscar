@@ -205,6 +205,13 @@ export function signOutStaleIdentity() {
   setTimeout(() => location.reload(), 0)
 }
 
+/** Plant the notice so it survives the reload a stale tab performs on arrival at
+ *  the login screen — without this the reload would discard the very message that
+ *  explains why the user is being asked to sign in. */
+export function markUpdatedReload() {
+  try { localStorage.setItem(K_SIGNOUT_REASON, 'stale_identity') } catch { /* private mode */ }
+}
+
 /** Read AND clear the reason — one-shot, so it explains the redirect that just
  *  happened and never a later visit. */
 export function takeSignOutReason(): string | null {
