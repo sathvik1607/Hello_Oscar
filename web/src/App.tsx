@@ -9,6 +9,7 @@ import { AuthScreen } from './features/auth/AuthScreen'
 import { TodayScreen } from './features/today/TodayScreen'
 import { VoiceProvider } from './features/voice/VoiceProvider'
 import { Spinner } from './ui'
+import { ErrorBoundary } from './shell/ErrorBoundary'
 import { checkFreshness, watchBuildMismatch } from './lib/freshness'
 
 /**
@@ -232,6 +233,11 @@ export default function App() {
     <VoiceProvider>
       <LiveTitle />
       <AppShell section={section} onNavigate={navigate}>
+        {/* 🔴 Inside Suspense AND keyed on the section, so a crash on one screen
+            does not permanently poison the others: navigating away remounts the
+            boundary with fresh state instead of leaving the user stuck on an error
+            card for the rest of the session. */}
+        <ErrorBoundary key={section}>
         <Suspense fallback={<Spinner />}>
           {section === 'today' && <TodayScreen />}
           {section === 'tasks' && <TasksScreen target={target} />}
@@ -244,6 +250,7 @@ export default function App() {
           {section === 'notifications' && <NotificationsScreen onNavigate={navigate} />}
           {section === 'settings' && <SettingsScreen />}
         </Suspense>
+        </ErrorBoundary>
       </AppShell>
     </VoiceProvider>
   )

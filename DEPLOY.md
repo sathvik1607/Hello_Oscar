@@ -82,3 +82,27 @@ Render's Deploys tab → the previous deploy → Redeploy. Or:
     git push --force-with-lease checking 278144d:internal/testing
 
 278144d is what internal/testing pointed at before this.
+
+
+---
+
+## The SPA rewrite must EXCLUDE /assets/
+
+`"source": "/((?!assets/).*)"` — negative lookahead, deliberately.
+
+The rewrite used to be `"/(.*)"`, which catches EVERYTHING including asset files
+that no longer exist. That matters after a deploy: the old content-hashed chunk
+filenames are gone, but a request for one returned **HTTP 200 with an HTML
+document** instead of a 404. The browser then executed HTML as JavaScript, threw a
+SyntaxError inside React's `lazy()`, and — with no error boundary — rendered a
+completely blank white page. It looked like "the app is loading forever", so users
+waited instead of reloading.
+
+Verified against the live site: a chunk filename from earlier the same day returned
+`200` and `<!doctype html>`.
+
+With `/assets/` excluded a missing chunk 404s honestly, which is what the browser's
+own retry and our ErrorBoundary can both act on.
+
+Clean paths (`/tasks`, `/notifications`) still rewrite to `index.html` — they are
+not under `/assets/`, so the SPA routing this rewrite exists for is unaffected.

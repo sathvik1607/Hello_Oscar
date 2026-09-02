@@ -4,5 +4,10 @@
   "outputDirectory": "web/dist",
   "installCommand": "echo skipped — the build command installs inside web/",
   "framework": null,
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "rewrites": [
+    {
+      "source": "/((?!assets/).*)",
+      "destination": "/index.html"
+    }
+  ]
 }
