@@ -1,5 +1,3 @@
-import { RefreshCw } from 'lucide-react'
-import { signOut } from '../lib/session'
 import { BUILD_ID, serverBuildId } from '../lib/freshness'
 
 /**
@@ -26,60 +24,49 @@ import { BUILD_ID, serverBuildId } from '../lib/freshness'
 export function StaleVersionGate() {
   const server = serverBuildId()
 
-  // Sign out BEFORE reloading, so the fresh bundle starts at a clean login rather
-  // than rehydrating a session minted against whatever backend the old code was
-  // talking to — the stale-identity bug this pairs with.
-  const reloadClean = () => {
-    signOut()
-    location.reload()
-  }
+  /**
+   * Reload. Does NOT sign the user out.
+   *
+   * 🔴 It used to, and that was wrong for a client-facing app: a stale BUNDLE says
+   * nothing about whether the SESSION is bad. The overwhelmingly common case is a
+   * tab open across a routine deploy where the backend has not moved — so signing
+   * out made a routine refresh cost a re-login, which for anyone who does not have
+   * their password to hand is a much bigger interruption than the problem.
+   *
+   * A session that genuinely is invalid is already handled elsewhere and more
+   * precisely: a 401 signs out through the api client, and a cached identity from
+   * another database is caught by identityIsStale. Neither needs this button's
+   * help, and pre-emptively destroying a good session to cover a case those two
+   * already own is the kind of "safe" that is actually just lossy.
+   */
+  const reloadClean = () => location.reload()
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-6"
          style={{ background: 'var(--bg)' }}>
-      <div className="w-full max-w-md rounded-2xl border p-6"
-           style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border)' }}>
-        <div className="flex size-11 items-center justify-center rounded-xl"
-             style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
-          <RefreshCw className="size-5" />
-        </div>
+      <div className="w-full max-w-sm text-center">
+        <h1 className="text-[17px] font-semibold">Oscar has been updated</h1>
 
-        <h1 className="mt-4 text-[17px] font-semibold">This page is out of date</h1>
-
+        {/* One sentence, and it names the action. The long version of this card
+            explained caching, listed two numbered steps and spent a paragraph on
+            why signing out does not help — all true, none of it what someone
+            staring at a stuck page needs. The button does the work; the only
+            thing worth saying in words is that reloading is what fixes it. */}
         <p className="mt-2 text-[13.5px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-          Oscar has been updated since you opened this tab, and this page is still
-          running the old version. It may be talking to a server that no longer
-          exists, so what you see here can be wrong.
+          This page is running an old version. Reload to continue — signing out
+          won’t fix it.
         </p>
 
-        <div className="mt-4 rounded-xl p-3.5 text-[13px] leading-relaxed"
-             style={{ background: 'var(--bg-sunken)' }}>
-          <p className="font-semibold">Do this:</p>
-          <ol className="mt-1.5 list-decimal space-y-1 pl-4">
-            <li><span className="font-semibold">Reload this page</span> — use the
-              button below, or press <kbd className="rounded px-1 font-mono text-[11px]"
-              style={{ background: 'var(--bg)' }}>⌘⇧R</kbd> / <kbd
-              className="rounded px-1 font-mono text-[11px]"
-              style={{ background: 'var(--bg)' }}>Ctrl⇧R</kbd>.</li>
-            <li><span className="font-semibold">Sign in again</span> after it reloads.</li>
-          </ol>
-          {/* The correction that saves the loop. */}
-          <p className="mt-2.5" style={{ color: 'var(--text-subtle)' }}>
-            Signing out on its own will <span className="font-semibold">not</span> fix
-            this — it does not reload the page, so the old version keeps running.
-            You have to reload.
-          </p>
-        </div>
-
         <button type="button" onClick={reloadClean}
-                className="mt-4 w-full rounded-xl px-4 py-2.5 text-[14px] font-semibold text-white"
+                className="mt-5 w-full rounded-xl px-4 py-2.5 text-[14px] font-semibold text-white"
                 style={{ background: 'var(--accent)' }}>
-          Reload and sign in again
+          Reload
         </button>
 
-        <p className="mt-3 text-center font-mono text-[10.5px]"
-           style={{ color: 'var(--text-subtle)' }}>
-          this tab {BUILD_ID}{server ? ` · server ${server}` : ''}
+        {/* Kept: it is the one fact that made this class of bug diagnosable at all,
+            and a screenshot of it answers "which build are you on?". */}
+        <p className="mt-3 font-mono text-[10.5px]" style={{ color: 'var(--text-subtle)' }}>
+          {BUILD_ID}{server ? ` · server ${server}` : ''}
         </p>
       </div>
     </div>
