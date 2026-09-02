@@ -5,7 +5,7 @@ import { useApi } from '../../lib/useApi'
 import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
 import { getUser, identityIsStale, signOutStaleIdentity } from '../../lib/session'
 import {
-  dayLabel, isPast, isToday, isTomorrow, istDateKey, istNow, messageTime, parseIstNaive,
+  isToday, istDateKey, istNow, messageTime, parseIstNaive,
 } from '../../lib/format'
 import { resolvePresence, usePresence } from '../../lib/presence'
 import type { Task } from '../../lib/types'
@@ -133,19 +133,20 @@ export function TeamScreen() {
   const shown = useMemo(() => {
     const raw = selected ? (memberTasks.data?.tasks ?? []) : (projects.data?.tasks ?? [])
     /**
-     * 🔴 A PICKED MEMBER IS SCOPED TO TODAY. The workspace view is a planning
-     * view — everything ahead and everything that slipped — but picking a person
-     * off the roster asks a narrower question: what is this member on RIGHT NOW.
-     * Their whole backlog answered that with weeks of history and a scroll.
+     * 🔴 THIS SCREEN IS TODAY ONLY — the workspace and a picked member alike.
      *
-     * Today by the IST calendar day (istDateKey, same as the grouping below), so a
-     * task at 23:30 counts as today rather than being pushed over by the browser's
-     * offset. Undated tasks are dropped here as well — they are dropped by the
-     * grouping anyway, and a task with no date is not "today".
+     * My Team answers "who is on what", and that is a question about right now.
+     * The workspace view was a planning view instead: 216 tasks across weeks,
+     * with today's four rows sitting below two months of slipped work and above
+     * everything still ahead. Nobody scrolls that to find out what the team is
+     * doing today, and Tasks and the calendar already exist for the long view.
+     *
+     * Today by the IST calendar day (istDateKey, the same basis as the grouping
+     * below), so a task at 23:30 stays on its own date rather than being pushed
+     * over by the browser's offset. Undated tasks fall out here as well — the
+     * grouping was already dropping them, and a task with no date is not "today".
      */
-    const scoped = selected
-      ? raw.filter(t => isToday(parseIstNaive(t.due_at)))
-      : raw
+    const scoped = raw.filter(t => isToday(parseIstNaive(t.due_at)))
     const closed = (t: Task) => t.status === 'completed' || t.status === 'cancelled'
     return [...scoped].sort((a, b) =>
       Number(closed(a)) - Number(closed(b)) || byDueAsc(a, b))
@@ -153,81 +154,42 @@ export function TeamScreen() {
   const activeShown = shown.filter(t => t.status !== 'cancelled')
 
   /**
-   * Grouped by DUE DAY, with the day named.
+   * Two headings: Today, then Done today.
    *
-   * A flat list gives no sense of when anything lands — and this workspace really has
-   * 300 project tasks. Dated headings turn it into "what is on today, what is
-   * tomorrow, what has slipped".
+   * The list is a single day (see `shown`), so the only split left worth drawing is
+   * open versus finished. This was four dated headings — Overdue, Today/Tomorrow, a
+   * named day, and a Done group per day — which is what the multi-week list it used
+   * to be actually needed.
    *
-   * Four headings, in the order they matter:
-   *   Overdue          past its time and still open — first, always
-   *   Today / Tomorrow
-   *   a named day      "Mon 25 Aug"
-   *   Done · <day>     finished work, by the day it was due, last of all
-   *
-   * 🔴 There is no "No date" heading, open or done. A heading with no day in it is
-   * not a group, it is a pile — nothing about an undated row says when it matters,
-   * so it could only grow and never resolve. Those tasks are untouched and still
-   * visible on Tasks and in the member's own list; they are just not part of a view
-   * about who is doing what this week.
-   *
-   * Keyed on istDateKey, the IST calendar day, so a task at 23:30 stays on its own
-   * date instead of being pushed into the next one by the browser's offset.
+   * 🔴 Undated tasks are not here, and never were. A heading with no day in it is
+   * not a group, it is a pile — nothing about an undated row says when it matters.
+   * They are untouched and still visible on Tasks and in the member's own list;
+   * they are simply not part of a view about today.
    */
   const groups = useMemo(() => {
     const isClosed = (t: Task) => t.status === 'completed' || t.status === 'cancelled'
-    const out: { key: string; label: string; rank: number; tasks: Task[] }[] = []
-    const find = (key: string, label: string, rank: number) => {
-      let g = out.find(x => x.key === key)
-      if (!g) { g = { key, label, rank, tasks: [] }; out.push(g) }
-      return g
-    }
-    for (const t of activeShown) {
-      const due = parseIstNaive(t.due_at)
-      if (isClosed(t)) {
-        // 🔴 FINISHED WORK IS GROUPED BY DAY TOO, not piled into one bucket. As a
-        // single group it was 83 tasks spanning weeks, and because the list is sorted
-        // by full datetime the visible times cycled — 08:00, 20:11, 08:00, 12:00 —
-        // which reads as unsorted even though it is not.
-        //
-        // Undated finished work is DROPPED, for the same reason the open "No date"
-        // group went: a heading with no day in it is not a group, it is a pile, and
-        // on a screen about who is doing what this week it answers nothing. Finished
-        // AND undated is the least useful row on the page.
-        if (!due) continue
-        find(`done-${istDateKey(due)}`,
-             isToday(due) ? 'Done today' : `Done · ${dayLabel(due)}`,
-             4).tasks.push(t)
-      }
-      // 🔴 UNDATED WORK IS NOT SHOWN. It had its own "No date" group, which was a
-      // place tasks went to be forgotten: nothing about a row with no date says
-      // when it matters, so the group could only ever grow. Dropped rather than
-      // folded into a dated group, because guessing a date for someone else's task
-      // is worse than leaving it out of this view — it is still on Tasks and in
-      // that member's own list.
-      else if (!due)            continue
-      else if (isPast(due) && !isToday(due))
-                                find('overdue', 'Overdue', 0).tasks.push(t)
-      else if (isToday(due))    find('today', 'Today', 1).tasks.push(t)
-      else if (isTomorrow(due)) find('tomorrow', 'Tomorrow', 1).tasks.push(t)
-      else                      find(istDateKey(due), dayLabel(due), 2).tasks.push(t)
-    }
     /**
-     * Rank first, then the day — but the day sorts in OPPOSITE directions either side
-     * of the split, because "next" and "latest" are different questions:
+     * Two groups, because the list is one day: what is still on, then what is done.
      *
-     *   open work (ranks 0-2)   ASCENDING  — soonest first, what needs doing next
-     *   finished work (rank 4)  DESCENDING — most recent day first, what just landed
+     * This used to build four ranks — Overdue, Today/Tomorrow, a named day, and a
+     * Done group per day — which is what a list spanning weeks needs. Scoped to
+     * today those branches are unreachable: nothing here is overdue by a day,
+     * nothing is tomorrow, and every finished row was due today. Dead branches
+     * whose comments describe behaviour the screen no longer has are worse than no
+     * branches, so they are gone rather than left to rot.
      *
-     * Times inside every group stay ascending, from the byDueAsc sort upstream.
+     * Open first. A finished task between two live ones answers a question nobody
+     * asked, and the point of the screen is what is outstanding.
+     *
+     * Times inside each group stay ascending, from the byDueAsc sort upstream.
      */
-    return out.sort((a, b) => {
-      if (a.rank !== b.rank) return a.rank - b.rank
-      if (a.rank === 4) return b.key.localeCompare(a.key)      // newest day on top
-      if (a.key === 'today') return -1
-      if (b.key === 'today') return 1
-      return a.key.localeCompare(b.key)
-    })
+    const open: Task[] = []
+    const done: Task[] = []
+    for (const t of activeShown) (isClosed(t) ? done : open).push(t)
+    const out: { key: string; label: string; tasks: Task[] }[] = []
+    if (open.length) out.push({ key: 'today', label: 'Today', tasks: open })
+    if (done.length) out.push({ key: 'done-today', label: 'Done today', tasks: done })
+    return out
   }, [activeShown])
   const selectedMember = roster.find(m => m.user_id === selected)
   /** "Your tasks", not "Sathvik's tasks" — reading your own name back at you in a
@@ -376,13 +338,16 @@ export function TeamScreen() {
                  member is picked. "Nothing open" would be a claim about their
                  whole backlog, which this view no longer shows — and they may
                  well have plenty, just not due today. */
+              /* Every one of these says TODAY, because that is what the list is
+                 scoped to. "No team projects" would be a claim about the whole
+                 board — which may well be full, just not for today. */
               title={headingName
                 ? (headingName === 'Your' ? 'Nothing on today'
                    : `${selectedMember?.name} has nothing on today`)
-                : 'No team projects'}
+                : 'Nothing on today'}
               body={selectedMember
                 ? 'Their tasks due today will show here.'
-                : 'Project tasks shared across the workspace appear here.'}
+                : "The team's tasks due today will show here."}
               /* Desktop only, same reasoning as Today: on a phone this sits a short
                  scroll below the identical button in the section header, so both
                  would render as two calls to action for one thing. On desktop they
@@ -402,11 +367,12 @@ export function TeamScreen() {
 
         {groups.map(g => (
           <div key={g.key} className="mb-5">
-            {/* The day, then how many land on it. Overdue is the only heading that is
-                a problem rather than a fact, so it is the only one coloured. */}
+            {/* Just the label and a count. Nothing here is coloured: the Overdue
+                heading was the only red one and it cannot occur in a single-day
+                list — a task due earlier today is not late by a day. */}
             <div className="mb-2 flex items-center gap-2 px-1">
               <span className="text-[12px] font-semibold uppercase tracking-[.08em]"
-                    style={{ color: g.key === 'overdue' ? '#DC2626' : 'var(--text-muted)' }}>
+                    style={{ color: 'var(--text-muted)' }}>
                 {g.label}
               </span>
               <span className="rounded-full px-1.5 py-px text-[11px] font-semibold tabular-nums"
@@ -439,16 +405,15 @@ export function TeamScreen() {
            intent of pressing this button here — making you re-pick the same person
            inside the form is a step that can only be got wrong, and getting it
            wrong sends work to the wrong person.
-           seedDate follows the SCOPE: with a member picked the list is today only,
-           so a task created for another day would be filed correctly and then
-           disappear from the list you are looking at, which reads as the create
-           having failed. On the workspace view there is no single day in view (it
-           groups across Overdue/Today/Tomorrow/…), so the form's own default is
-           the honest starting point there.
+           seedDate is TODAY, always, because the whole screen is now today: a task
+           created for another day would file correctly and then disappear from the
+           list you are looking at, which reads as the create having failed. The
+           date is still editable in the form — this is the starting point, not a
+           restriction.
            A task for someone else lands on the team board automatically —
            NewTaskSheet forces is_project when the assignee is not you. */
         <NewTaskSheet
-          seedDate={selected ? istDateKey(istNow()) : null}
+          seedDate={istDateKey(istNow())}
           seedAssignees={selected ? [selected] : null}
           onClose={() => setCreating(false)}
           onCreated={() => {
