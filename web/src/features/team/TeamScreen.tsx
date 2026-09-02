@@ -35,14 +35,18 @@ export function TeamScreen() {
   const me = getUser()
   const teamId = me?.team_id
   /**
-   * Opens on YOU, not on the whole workspace.
+   * Opens on the WORKSPACE, not on you.
    *
-   * `null` means the workspace, and that was the default — but landing on 300 project
-   * tasks belonging to six people answers a question you did not ask yet. Your own
-   * team work is the thing you came to check; the workspace card is one tap away and
-   * so is everyone else.
+   * 🔴 This was reversed, and defaulting to your own tasks was wrong for the screen
+   * it is on. My Team answers "who is on what" — everyone ELSE'S work is the reason
+   * to open it, and your own is already the entire Today and Tasks screens. Landing
+   * here on your own 100 rows made it a third copy of a screen you have twice, with
+   * the team's work one tap away and invisible until you took it.
+   *
+   * `null` means the workspace (every member's project tasks). Picking a member from
+   * the roster still narrows to that person, which is what the roster is for.
    */
-  const [selected, setSelected] = useState<number | null>(() => getUser()?.id ?? null)
+  const [selected, setSelected] = useState<number | null>(null)
   const [openTask, setOpenTask] = useState<Task | null>(null)
   // Unread comments per task — the badge and the glow on each card, and the
   // clear when one is opened. See useUnreadComments: derived from the bell rows
