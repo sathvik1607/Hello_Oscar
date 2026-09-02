@@ -72,9 +72,22 @@ export function TodayScreen() {
       (parseIstNaive(b.scheduled_at)?.getTime() ?? 0)),
   [m.data])
 
-  const nextUp = timeline.find(x => !isReallyOverdue(x)) ?? timeline[0]
+  /**
+   * The counts run over the OPEN rows only.
+   *
+   * 🔴 `timeline` now contains completed tasks too (they stay in place rather than
+   * moving to a section at the bottom), so `timeline.length` is the number of rows
+   * on screen — NOT the amount of work left. Passing it as "open" told someone who
+   * had finished everything that they still had nine things to do, and counted
+   * finished rows toward the "to do" pill.
+   */
+  const openToday = useMemo(
+    () => timeline.filter(x => x.status !== 'completed'), [timeline])
+
+  // Next up must be something still to DO — a finished task is not "next".
+  const nextUp = openToday.find(x => !isReallyOverdue(x)) ?? openToday[0]
   const nextDue = nextUp?.due_at ? parseIstNaive(nextUp.due_at) : null
-  const overdueCount = timeline.filter(x => isReallyOverdue(x)).length
+  const overdueCount = openToday.filter(x => isReallyOverdue(x)).length
 
   if (t.loading && !t.data) {
     return (
@@ -99,7 +112,7 @@ export function TodayScreen() {
                   page and telling you your own name. The state of the day gets that
                   type instead — this is a console, not a personal dashboard. */}
               <p className="text-[19px] font-semibold leading-snug tracking-tight sm:text-[21px]">
-                {headline(timeline.length, overdueCount, todaysMeetings.length, done.length)}
+                {headline(openToday.length, overdueCount, todaysMeetings.length, done.length)}
               </p>
               {/* Next up is the ONE actionable fact, so it gets its own line and its
                   time sits under the title rather than trailing it in prose — a time
@@ -143,9 +156,12 @@ export function TodayScreen() {
 
           {(timeline.length > 0 || done.length > 0 || todaysMeetings.length > 0) && (
             <div className="mt-4 flex flex-wrap gap-2 sm:mt-5">
-              {timeline.length > 0 && (
+              {/* OPEN rows, not every row — `timeline` includes today's completed
+                  tasks now, and counting those as "to do" is a lie the "done" pill
+                  right beside it immediately contradicts. */}
+              {openToday.length > 0 && (
                 <Pill icon={<Clock className="size-3.5" />} label="to do"
-                      value={timeline.length} />
+                      value={openToday.length} />
               )}
               {overdueCount > 0 && (
                 <Pill icon={<Clock className="size-3.5" />} label="overdue"
@@ -217,23 +233,10 @@ export function TodayScreen() {
         )}
       </section>
 
-      {/* ── what got done ────────────────────────────────────────────── */}
-      {done.length > 0 && (
-        <section>
-          <SectionHeading count={done.length}>Completed today</SectionHeading>
-          <div className="space-y-2">
-            {done.map(task => (
-              <TaskCard
-                key={task.id} task={task}
-                busy={busyId === task.id}
-                onToggle={() => void toggle(task)}
-                onOpen={() => { comments.markSeen(task.id); setOpenTask(task) }}
-                        unreadComments={comments.byItem.get(task.id)}
-              />
-            ))}
-          </div>
-        </section>
-      )}
+      {/* 🔴 NO "Completed today" SECTION. Completed tasks now stay in their
+          chronological slot in the timeline above — see todayTimeline. Rendering
+          them here as well would show every finished task twice. `done` is still
+          computed, for the count pill and the empty-state copy. */}
 
       {creating && (
 

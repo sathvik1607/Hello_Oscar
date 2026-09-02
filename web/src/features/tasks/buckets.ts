@@ -115,8 +115,24 @@ export function groupTasks(tasks: Task[]): Record<BucketId, Task[]> {
  */
 export function todayTimeline(tasks: Task[]): Task[] {
   return tasks
-    .filter(isActive)
     .filter(t => {
+      // 🔴 COMPLETED TASKS STAY IN PLACE. They used to be filtered out here and
+      // re-rendered in a "Completed today" section at the bottom — so ticking a
+      // 9am task made it JUMP past everything else to the foot of the page. That
+      // reads as the row vanishing: the thing you just acted on is the thing that
+      // moves furthest from where you were looking, and on a long day it leaves the
+      // screen entirely. Left in position, the tick is the only thing that changes
+      // and the list stays a record of the day in order.
+      //
+      // Cancelled is still excluded — that is work that is not happening, not work
+      // that happened.
+      if (t.status === 'cancelled') return false
+      if (t.status === 'completed') {
+        // Completed TODAY, by when it was completed — a task due last week and
+        // ticked this morning belongs to this morning.
+        const at = parseIstNaive(t.completed_at)
+        return !!at && isToday(at)
+      }
       const due = parseIstNaive(t.due_at)
       return t.status === 'in_progress' || (due && isToday(due))
     })
