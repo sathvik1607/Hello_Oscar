@@ -79,22 +79,19 @@ mobile client sends one too.
 ## Deploys and staleness
 
 A long-lived tab is the normal case here, so a deploy leaves real users running a
-bundle the server no longer has. Three independent detectors handle it — the asset
-check and the `X-App-Version` header watcher in `lib/freshness.ts`, plus
-`shell/ErrorBoundary.tsx` catching the crash itself with one `sessionStorage`-guarded
-reload. Details and the traps in `VERCEL.md`.
+bundle the server no longer has. Two detectors handle it, both **latched** — the
+asset comparison in `lib/freshness.ts`, and `shell/ErrorBoundary.tsx` catching the
+crash itself with one `sessionStorage`-guarded reload. Details in `VERCEL.md`.
 
-Two backend requirements come with it:
+⚠️ **Both are inert under `npm run dev`** — Vite serves unhashed modules, so there
+are no asset names to compare. **A dev page that keeps reloading is Vite's HMR, not
+this.**
 
-* `expose_headers` must include **`X-App-Version`** — a cross-origin response header
-  JS has not been told it may read is invisible, with no error.
-* The header is **absent** when neither `RENDER_GIT_COMMIT` nor `APP_BUILD_ID` is
-  set (i.e. always, locally). A missing header means "no information", never stale.
-
-⚠️ **`X-App-Version` is not on the deployed backend yet.** It is committed on
-`remove-rfq-from-oscar`, which `Developement_BRANCH` does not serve, so detector #2
-is currently inert and the asset check carries the load. That is a deploy gap, not a
-bug — both degrade correctly.
+🔴 **Do not add a detector that compares our build id to the backend's.** One
+existed and was removed: `__BUILD_ID__` is a commit in this repo, `X-App-Version` a
+commit in the backend repo, so the two can never be equal and it reported a
+permanent false "new version available". A backend redeploy does not make a browser
+bundle stale; only a web deploy does. `X-App-Version` is kept for diagnostics only.
 
 ---
 
