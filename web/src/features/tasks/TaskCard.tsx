@@ -1,5 +1,5 @@
 import {
-  AlertCircle, ArrowLeft, ArrowRight, Check, GitBranch, MessageSquare, Users,
+  AlertCircle, ArrowLeft, ArrowRight, Check, GitBranch, MessageSquare, User, Users,
 } from 'lucide-react'
 import type { Task } from '../../lib/types'
 import {
@@ -72,6 +72,12 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee,
   const toName = iOwn && task.assigned_to_user_id && task.assigned_to_user_id !== me?.id
     ? task.assigned_to_name : null
   const fromName = !iOwn ? task.owner_name : null
+  // Nobody else is involved: I own it and it is assigned to me (or to nobody, which
+  // create_item resolves to me anyway). Previously this rendered NOTHING — both
+  // fromName and toName are null — so a self-assigned task had a blank space where
+  // every other card names a person, and the row looked unfinished rather than
+  // deliberately solo. "Personal" is the honest label and matches the mobile card.
+  const isPersonal = !fromName && !toName
 
   return (
     <Card className={cx('group transition', terminal && 'opacity-60')}
@@ -186,6 +192,13 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee,
           {/* From is ACCENT-coloured and bolder while To is muted, deliberately:
               work someone handed YOU is a claim on your time, work you handed out is
               a thing to track. The Flutter card draws exactly this distinction. */}
+          {isPersonal && (
+            <div className="mt-1 flex items-center gap-1 text-xs"
+                 style={{ color: 'var(--text-subtle)' }}>
+              <User className="size-3 shrink-0" />
+              <span>Personal</span>
+            </div>
+          )}
           {fromName && (
             <div className="mt-1 flex items-center gap-1 text-xs font-medium"
                  style={{ color: 'var(--accent)' }}>
