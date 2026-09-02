@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ArrowRight, KeyRound, Mail } from 'lucide-react'
 import { ApiError, auth } from '../../lib/api'
-import { baseIsLocked, getBase, setBase, signIn } from '../../lib/session'
+import { baseIsLocked, getBase, setBase, signIn, takeSignOutReason } from '../../lib/session'
 import { Logo } from '../../shell/AppShell'
 import {
   Button, Card, Field, cx, inputCls, inputStyle,
@@ -25,6 +25,13 @@ export function AuthScreen() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
+  // Explains an automatic sign-out that just happened, so being bounced here does
+  // not read as a bug. One-shot: read and cleared, so it never shows on a later visit.
+  const [notice] = useState<string | null>(() =>
+    takeSignOutReason() === 'stale_identity'
+      ? 'You were signed out because this browser was pointed at a different ' +
+        'backend, where your account has a different id. Please sign in again.'
+      : null)
   const [err, setErr] = useState<string | null>(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [baseUrl, setBaseUrl] = useState(getBase())
@@ -109,6 +116,16 @@ export function AuthScreen() {
                 />
               </div>
             </Field>
+
+            {/* Informational, not an error — nothing went wrong, the session simply
+                belonged to another backend. Suppressed once a real error exists, so
+                the two never stack. */}
+            {notice && !err && (
+              <div className="rounded-xl px-3.5 py-3 text-[13px] leading-relaxed"
+                   style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+                {notice}
+              </div>
+            )}
 
             {err && (
               <div className="rounded-xl px-3.5 py-3 text-[13px] leading-relaxed"

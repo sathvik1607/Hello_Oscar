@@ -147,3 +147,56 @@ export function applyTheme(t: Theme = getTheme()) {
     (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
   document.documentElement.classList.toggle('dark', dark)
 }
+
+/**
+ * Is the cached identity still valid on the backend we are now talking to?
+ *
+ * 🔴 A TOKEN SURVIVES A DATABASE SWAP, AND THAT IS THE WHOLE PROBLEM. The bearer
+ * token is an HMAC over a user id with nothing binding it to a particular database,
+ * so pointing the app at a different backend leaves `oscar.web.user` holding an id
+ * from the OLD one — and it still verifies. Login succeeds, the shell renders your
+ * name, and then every id-scoped call asks about a person who does not exist there.
+ *
+ * Observed: the app was repointed from a prod backend to `epa-3` (which runs against
+ * the DEV database). The same human is a different id in each — Sathvik is 48 on
+ * dev, Vijender 45 on dev and 4 on prod — so My Team requested
+ * `/teams/7/members/<old id>/tasks` and got a red "Member not in this team" card on
+ * a team that was in perfect health. The screen looked broken; the data was fine and
+ * the cached id was stale.
+ *
+ * Rather than add a startup probe, this reuses a roster the screen already fetches:
+ * if the signed-in id is absent from its own team's member list, the cached identity
+ * cannot be right. Cheap, and no new endpoint (there is no `/me`, and the
+ * user-scoped reads answer 200-with-nothing for an unknown id, so they cannot tell
+ * "no data" from "no such user" — the only route that does validate is a POST that
+ * calls an LLM).
+ *
+ * Returns true only for a CONFIRMED mismatch: an empty or failed roster returns
+ * false, because signing someone out over a network blip is worse than the
+ * confusing screen this exists to prevent.
+ */
+export function identityIsStale(roster: { user_id: number }[] | null | undefined): boolean {
+  const u = getUser()
+  if (!u || !roster || roster.length === 0) return false
+  return !roster.some(m => m.user_id === u.id)
+}
+
+const K_SIGNOUT_REASON = 'oscar.web.signout_reason'
+
+/** Sign out because the cached identity belongs to another backend's database.
+ *  Leaves a one-shot reason behind so the login screen can say WHY — being bounced
+ *  to a login screen with no explanation reads as a bug, and the honest sentence
+ *  ("this account is from a different backend") is also the one that stops someone
+ *  retrying the same password three times. */
+export function signOutStaleIdentity() {
+  try { localStorage.setItem(K_SIGNOUT_REASON, 'stale_identity') } catch { /* private mode */ }
+  signOut()
+}
+
+/** Read AND clear the reason — one-shot, so it explains the redirect that just
+ *  happened and never a later visit. */
+export function takeSignOutReason(): string | null {
+  const r = localStorage.getItem(K_SIGNOUT_REASON)
+  if (r) localStorage.removeItem(K_SIGNOUT_REASON)
+  return r
+}

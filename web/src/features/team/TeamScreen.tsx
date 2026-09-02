@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Circle, Users } from 'lucide-react'
 import { team as teamApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
-import { getUser } from '../../lib/session'
+import { getUser, identityIsStale, signOutStaleIdentity } from '../../lib/session'
 import {
   dayLabel, isPast, isToday, isTomorrow, istDateKey, messageTime, parseIstNaive,
 } from '../../lib/format'
@@ -66,6 +66,22 @@ export function TeamScreen() {
   useLiveData(ITEM_FRAMES,
               () => { projects.reload(); memberTasks.reload(); members.reload() },
               { invalidatePrefixes: [...ITEM_CACHES, 'members'] })
+
+  /**
+   * The cached identity belongs to a DIFFERENT backend's database — sign out.
+   *
+   * Detected off the roster this screen already loads: if the signed-in id is not in
+   * its own team's member list, `oscar.web.user` is stale (see identityIsStale). The
+   * symptom without this is a red "Member not in this team" card on a healthy team,
+   * because `selected` defaults to the cached id and that id exists nowhere here.
+   *
+   * Signing out is the honest response: a token minted against another database
+   * still verifies, so the session cannot be repaired in place — only re-established
+   * against the backend now in use.
+   */
+  useEffect(() => {
+    if (identityIsStale(members.data)) signOutStaleIdentity()
+  }, [members.data])
 
   // Live presence, overlaid on the fetched roster — see lib/presence.ts.
   const live = usePresence()
