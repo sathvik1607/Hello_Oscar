@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ArrowRight, KeyRound, Mail } from 'lucide-react'
 import { ApiError, auth } from '../../lib/api'
-import { getBase, setBase, signIn } from '../../lib/session'
+import { baseIsLocked, getBase, setBase, signIn } from '../../lib/session'
 import { Logo } from '../../shell/AppShell'
 import {
   Button, Card, Field, cx, inputCls, inputStyle,
@@ -36,7 +36,17 @@ export function AuthScreen() {
     if (busy) return
     setBusy(true); setErr(null)
     // Persisted BEFORE the request so the api client sends it to the right host.
-    setBase(baseUrl)
+    //
+    // 🔴 ONLY when the override is actually live, i.e. local dev. This used to run
+    // unconditionally, and because `baseUrl` is seeded from getBase(), EVERY login
+    // wrote the then-current URL into localStorage — including on the deployed site,
+    // where the field below is not even rendered. That froze the backend URL at
+    // whatever it was on the day you first signed in: later deploys changed the
+    // compiled URL and the app ignored all of them, calling a host that had since
+    // been suspended and naming it in an error that no longer appears anywhere in
+    // the bundle. getBase() now prefers the build, and this no longer writes a key
+    // that would need purging.
+    if (!baseIsLocked()) setBase(baseUrl)
     try {
       const r = await auth.login(email.trim(), password)
       if (!r.token) {

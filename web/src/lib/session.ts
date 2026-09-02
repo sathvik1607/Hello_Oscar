@@ -18,18 +18,50 @@ const K_USER = 'oscar.web.user'
 const K_BASE = 'oscar.web.base'
 const K_THEME = 'oscar.web.theme'
 
-export const DEFAULT_BASE =
-  (import.meta.env.VITE_BACKEND_URL as string | undefined)?.replace(/\/+$/, '') ??
-  'http://127.0.0.1:8000'
+/** The URL compiled into this build. Empty string when the env var is unset, which
+ *  is how `BUILT_IN` below distinguishes "a deploy told us where the backend is"
+ *  from "nobody said, fall back to localhost". */
+const BUILT_IN =
+  (import.meta.env.VITE_BACKEND_URL as string | undefined)?.replace(/\/+$/, '') ?? ''
 
-/** Backend origin. Overridable at runtime from Settings so one build can be pointed
- *  at local / dev / prod without a rebuild — the value is an origin, not a secret. */
+export const DEFAULT_BASE = BUILT_IN || 'http://127.0.0.1:8000'
+
+/**
+ * Backend origin.
+ *
+ * 🔴 A BUILD-TIME URL WINS OVER A SAVED ONE, and that ordering is the whole point.
+ * It used to be the other way round — `localStorage || DEFAULT_BASE` — which meant
+ * a value saved once from Settings silently beat every future deploy: the app kept
+ * calling a backend that had since been suspended, the error named a host that
+ * appears nowhere in the shipped bundle, and no amount of redeploying or
+ * cache-clearing could fix it because the wrong URL was in the browser, not the
+ * code. (The admin panel had the identical bug and was fixed the same way.)
+ *
+ * The runtime override survives where it is actually useful: local development,
+ * where VITE_BACKEND_URL is the localhost default, so Settings can still point a
+ * dev server at dev or prod without a rebuild.
+ *
+ * A stale key is PURGED rather than merely ignored, so it cannot resurface if this
+ * precedence is ever revisited.
+ */
 export function getBase(): string {
-  return localStorage.getItem(K_BASE)?.replace(/\/+$/, '') || DEFAULT_BASE
+  const saved = localStorage.getItem(K_BASE)?.replace(/\/+$/, '') || ''
+  if (BUILT_IN) {
+    if (saved && saved !== BUILT_IN) localStorage.removeItem(K_BASE)
+    return BUILT_IN
+  }
+  return saved || DEFAULT_BASE
 }
+
+/** Point this browser at another backend. Only takes effect when the build carries
+ *  no URL of its own (i.e. local dev) — see getBase(). */
 export function setBase(url: string) {
   localStorage.setItem(K_BASE, url.replace(/\/+$/, ''))
 }
+
+/** Is the runtime override actually honoured? False on a real deploy. Lets Settings
+ *  say so instead of offering a field that silently does nothing. */
+export const baseIsLocked = () => !!BUILT_IN
 
 /** ws:// for http://, wss:// for https://. An https page opening a ws:// socket is
  *  blocked as mixed content, and that failure surfaces as "voice does not work"
