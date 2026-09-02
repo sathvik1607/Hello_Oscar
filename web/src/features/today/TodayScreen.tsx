@@ -209,11 +209,15 @@ export function TodayScreen() {
                       onClick={() => setPick(p => p === 'overdue' ? null : 'overdue')}
                       value={overdueCount} tone="danger" />
               )}
+              {/* 🔴 NO tone — overdue is the ONLY red pill. Red means "this is a
+                  problem", and two reds beside each other dilute it to decoration:
+                  at a glance you cannot tell which one needs you. A critical task
+                  is a FACT about priority, not a failure; only missing it is. */}
               {criticalCount > 0 && (
                 <Pill icon={<Flame className="size-3.5" />} label="critical"
                       active={pick === 'critical'}
                       onClick={() => setPick(p => p === 'critical' ? null : 'critical')}
-                      value={criticalCount} tone="danger" />
+                      value={criticalCount} />
               )}
               {shownAnytime.length > 0 && (
                 <Pill icon={<Clock className="size-3.5" />} label="anytime"
