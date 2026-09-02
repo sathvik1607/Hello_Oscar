@@ -9,6 +9,8 @@ import { AuthScreen } from './features/auth/AuthScreen'
 import { TodayScreen } from './features/today/TodayScreen'
 import { VoiceProvider } from './features/voice/VoiceProvider'
 import { Spinner } from './ui'
+import { checkFreshness, watchBuildMismatch } from './lib/freshness'
+import { StaleVersionGate } from './shell/StaleVersionGate'
 
 /**
  * Root. Two states — signed out and signed in — and a path router.
@@ -91,6 +93,12 @@ function adoptLegacyHash(): SectionId | null {
 
 export default function App() {
   const [signedIn, setSignedIn] = useState(isSignedIn())
+  // Is this tab running code from an earlier deploy? Two independent detectors,
+  // either sufficient: X-App-Version on any response (immediate, free), and an
+  // asset-hash comparison against a re-fetched index.html (works with a backend
+  // that sends no header). Latched true — a version cannot un-stale itself, and
+  // flickering the gate off would drop the user back into the broken app.
+  const [staleVersion, setStaleVersion] = useState(false)
   // Runs the legacy-hash rewrite BEFORE the first read, so an old link renders its
   // real section immediately instead of showing Today and then correcting itself.
   const [section, setSection] = useState<SectionId>(
@@ -105,6 +113,34 @@ export default function App() {
     const onChange = () => applyTheme()
     mq.addEventListener('change', onChange)
     return () => mq.removeEventListener('change', onChange)
+  }, [])
+
+  /**
+   * Stale-code detection — see StaleVersionGate for why this BLOCKS rather than nags.
+   *
+   * Two independent detectors, either sufficient:
+   *  · X-App-Version on any API response — immediate and free, since it rides
+   *    requests the app was making anyway.
+   *  · an asset-hash comparison against a re-fetched index.html — covers a backend
+   *    that sends no such header, and catches a tab whose first action is a reload.
+   *
+   * Re-probed when the tab regains focus, which is when a long-lived tab is most
+   * likely to have gone stale. Latched: a build cannot un-stale itself, and letting
+   * the gate flicker off would drop someone back into the broken app.
+   */
+  useEffect(() => {
+    let alive = true
+    const mark = () => { if (alive) setStaleVersion(true) }
+    const unwatch = watchBuildMismatch(m => { if (m) mark() })
+    const probe = () => { void checkFreshness().then(f => { if (f === 'stale') mark() }) }
+    probe()
+    const onVis = () => { if (document.visibilityState === 'visible') probe() }
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      alive = false
+      unwatch()
+      document.removeEventListener('visibilitychange', onVis)
+    }
   }, [])
 
   // Sign-in / sign-out from anywhere — including a 401 inside the api client — has
@@ -174,6 +210,14 @@ export default function App() {
     // the destination is about to scroll to the item itself.
     if (!t) window.scrollTo({ top: 0 })
   }, [])
+
+  /**
+   * 🔴 BEFORE the auth branch, so it covers the signed-OUT state too. A stale tab
+   * sitting on the login screen is the worst case of all: the old bundle posts to a
+   * backend that may not exist, the failure reads as a wrong password, and the user
+   * retries forever. That is exactly the loop this exists to break.
+   */
+  if (staleVersion) return <StaleVersionGate />
 
   if (!signedIn) return <AuthScreen />
 

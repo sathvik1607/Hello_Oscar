@@ -64,3 +64,49 @@ export async function checkFreshness(): Promise<Freshness> {
     return 'unknown'
   }
 }
+
+// ── build identity ──────────────────────────────────────────────────────────
+
+/**
+ * The build this code was compiled from — a git sha on Vercel, a timestamp
+ * locally. See vite.config.ts.
+ *
+ * Compared for EQUALITY only. It is never ordered or parsed, so "newer" is not a
+ * question this can answer — only "different", which is the only question that
+ * matters for staleness.
+ */
+export const BUILD_ID: string =
+  typeof __BUILD_ID__ === 'string' ? __BUILD_ID__ : 'unknown'
+
+/**
+ * The build the SERVER is currently running, as reported by `X-App-Version` on any
+ * API response.
+ *
+ * 🔴 Read off responses the app was making anyway — no poll, no /version endpoint,
+ * no extra request. A version check that costs a request gets set to a long
+ * interval and then detects staleness minutes late; one that rides existing
+ * traffic is immediate and free.
+ *
+ * Null until a response carries the header, which also covers a backend that does
+ * not send it — in which case this whole path stays quiet rather than guessing.
+ */
+let serverBuild: string | null = null
+
+const buildListeners = new Set<(mismatch: boolean) => void>()
+
+/** Called by the api layer for every response. Cheap and idempotent. */
+export function noteServerBuild(v: string | null) {
+  if (!v || v === serverBuild) return
+  serverBuild = v
+  // Only a CONFIRMED disagreement counts. An unknown local build (a dev bundle
+  // built before this existed) must not report a mismatch against every response.
+  const mismatch = BUILD_ID !== 'unknown' && v !== BUILD_ID
+  buildListeners.forEach(f => f(mismatch))
+}
+
+export const serverBuildId = () => serverBuild
+export function watchBuildMismatch(fn: (mismatch: boolean) => void): () => void {
+  buildListeners.add(fn)
+  if (serverBuild) fn(BUILD_ID !== 'unknown' && serverBuild !== BUILD_ID)
+  return () => buildListeners.delete(fn)
+}

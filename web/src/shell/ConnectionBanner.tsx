@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Loader2, RefreshCw, WifiOff } from 'lucide-react'
 import { connectionState, watchConnection, type ConnState } from '../lib/appSocket'
-import { checkFreshness } from '../lib/freshness'
+import { checkFreshness, watchBuildMismatch } from '../lib/freshness'
 
 /**
  * The live-connection state, stated plainly.
@@ -42,7 +42,15 @@ export function ConnectionBanner() {
     run()
     const onVis = () => { if (document.visibilityState === 'visible') run() }
     document.addEventListener('visibilitychange', onVis)
-    return () => { alive = false; document.removeEventListener('visibilitychange', onVis) }
+    // The cheaper, faster signal: X-App-Version on responses the app was already
+    // making. Either source is sufficient — the header catches it on the very next
+    // request, the asset check covers a backend that sends no header at all.
+    const unwatch = watchBuildMismatch(m => { if (alive && m) setStale(true) })
+    return () => {
+      alive = false
+      document.removeEventListener('visibilitychange', onVis)
+      unwatch()
+    }
   }, [])
 
   useEffect(() => {

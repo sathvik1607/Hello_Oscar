@@ -14,6 +14,7 @@
  */
 
 import { getBase, getToken, requireUserId, signOut } from './session'
+import { noteServerBuild } from './freshness'
 import type {
   AppNotification, BusinessProfile, ChatMessage, ChatSession, ChatText,
   CommentAttachment, Conversations, LoginResponse, Meeting, Note, PlanDayResponse,
@@ -68,6 +69,12 @@ async function request<T>(path: string, opts: Opts = {}): Promise<T> {
       `Can't reach ${getBase()}. The server may be down, or this page's origin ` +
       `(${location.origin}) may not be in the backend's CORS_ORIGINS.`)
   }
+
+  // Every response doubles as a version check. `X-App-Version` names the build the
+  // SERVER is running; comparing it against ours detects a stale tab immediately and
+  // for free, instead of polling a /version endpoint on a timer that is always
+  // either too frequent or too slow. Absent header ⇒ nothing happens.
+  noteServerBuild(res.headers.get('X-App-Version'))
 
   if (res.status === 401) {
     // The token is gone or expired. Clearing the session here — rather than in each
