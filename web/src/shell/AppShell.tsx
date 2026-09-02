@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Menu, MoreHorizontal, X, Cog} from 'lucide-react'
 import { NAV, TITLES, type SectionId } from './nav'
 import { ConnectionBanner } from './ConnectionBanner'
-import { OscarButton } from '../features/voice/OscarButton'
+// import { OscarButton } from '../features/voice/OscarButton'  // see the two call sites below
 import { AmbientIndicator } from '../features/voice/AmbientIndicator'
 import { getUser, signOut } from '../lib/session'
 import { useUnreadCount } from '../lib/unread'
@@ -155,7 +155,12 @@ export function AppShell({ section, onNavigate, children }: {
               a tab is an assistant nobody talks to. Hidden on the smallest widths,
               where the floating button below serves the same purpose without
               crowding the title. */}
-          <div className="hidden sm:block"><OscarButton /></div>
+          {/* 🔴 COMMENTED OUT, not deleted — voice is being held back, and the
+              component plus its provider, overlay and hotkey are all still wired
+              up behind it. Re-enabling is uncommenting these two lines (here and
+              the floating one below); deleting them would mean rebuilding the
+              placement and the responsive split from scratch.
+              <div className="hidden sm:block"><OscarButton /></div> */}
         </header>
 
         <ConnectionBanner />
@@ -197,10 +202,11 @@ export function AppShell({ section, onNavigate, children }: {
 
       {/* Floating Oscar, above the bottom bar — the mobile equivalent of the
           header button, placed where a thumb rests. */}
+      {/* Commented out with the header button above — same reason.
       <div className="fixed bottom-[74px] right-4 z-30 sm:hidden"
            style={{ marginBottom: 'env(safe-area-inset-bottom)' }}>
         <OscarButton floating />
-      </div>
+      </div> */}
 
       {moreOpen && (
         <>

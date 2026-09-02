@@ -136,6 +136,17 @@ export function todayTimeline(tasks: Task[]): Task[] {
       const due = parseIstNaive(t.due_at)
       return t.status === 'in_progress' || (due && isToday(due))
     })
+    // 🔴 ONLY WORK THAT IS YOURS TO DO. `GET /tasks/{id}` returns everything you
+    // CREATED as well as everything ASSIGNED to you, so a lead's Today filled up
+    // with tasks they had handed to other people — measured on a real account, 5 of
+    // 11 rows were somebody else's job. Today answers "what do I have to do", and a
+    // row you cannot action is noise on that screen; delegated work belongs on My
+    // Team, which exists to answer "who is on what".
+    //
+    // `is_mine` is the test, NOT `assigned_to_user_id === me`: the legacy column
+    // names only the PRIMARY assignee, so on a shared task it answers wrong for
+    // everyone else on it.
+    .filter(t => t.is_mine !== false)
     .sort(byDueAsc)
 }
 
