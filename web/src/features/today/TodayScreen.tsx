@@ -122,8 +122,31 @@ export function TodayScreen() {
     : pick === 'critical' ? (t.priority === 'critical' || t.priority === 'high')
     : pick === 'anytime' ? !!t.is_all_day
     : t.status === 'completed'
-  const shownTimed = useMemo(() => timed.filter(match), [timed, pick])
-  const shownAnytime = useMemo(() => anytime.filter(match), [anytime, pick])
+
+  const shownTimed = useMemo(
+    // 'anytime' is the one pick that is about the OTHER group, so it hides the
+    // timed list entirely rather than filtering it.
+    () => (pick === 'anytime' ? [] : timed.filter(match)),
+    [timed, pick])
+
+  /**
+   * 🔴 OVERDUE AND CRITICAL DO NOT TOUCH THE ANYTIME GROUP.
+   *
+   * Filtering both groups by the same predicate emptied the ANYTIME section the
+   * moment you picked either — and for a structural reason, not a data one: an
+   * anytime task can never be overdue (no time to be late against, which is the
+   * whole point) and critical requires a due time, so critical + anytime is a
+   * combination the backend refuses. So those two picks could only ever produce an
+   * empty group, and 20 rows vanishing reads as the filter having broken the
+   * screen.
+   *
+   * Those two narrow the TIMED list and leave the anytime pile alone — it is a
+   * different question, not a subset of the same one. `anytime` and `done` still
+   * filter it, because those genuinely are about these rows.
+   */
+  const shownAnytime = useMemo(
+    () => (pick === 'overdue' || pick === 'critical' ? anytime : anytime.filter(match)),
+    [anytime, pick])
 
   // Next up must be something still to DO — a finished task is not "next".
   const nextUp = openToday.find(x => !isReallyOverdue(x)) ?? openToday[0]
