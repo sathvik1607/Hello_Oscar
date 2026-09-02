@@ -113,7 +113,11 @@ export function groupTasks(tasks: Task[]): Record<BucketId, Task[]> {
  * or giving this screen its own "earlier" section; both are deliberate product
  * decisions rather than something to slip in here.
  */
-export function todayTimeline(tasks: Task[]): Task[] {
+export function todayTimeline(tasks: Task[], dayKey?: string): Task[] {
+  // Which calendar day this list is about. Defaults to today; a screen with a day
+  // picker passes the picked one. Compared as an IST date KEY rather than with
+  // isToday(), so "today" is not special-cased and the same function serves both.
+  const target = dayKey ?? istDateKey(istNow())
   return tasks
     .filter(t => {
       // 🔴 COMPLETED TASKS STAY IN PLACE. They used to be filtered out here and
@@ -131,7 +135,7 @@ export function todayTimeline(tasks: Task[]): Task[] {
         // Completed TODAY, by when it was completed — a task due last week and
         // ticked this morning belongs to this morning.
         const at = parseIstNaive(t.completed_at)
-        return !!at && isToday(at)
+        return !!at && istDateKey(at) === target
       }
       // 🔴 ANYTIME TASKS ALWAYS BELONG HERE, whatever their date. Their due_at is a
       // placeholder for a DAY, not a commitment to one — so a date is the wrong
@@ -144,7 +148,7 @@ export function todayTimeline(tasks: Task[]): Task[] {
       if (t.is_all_day) return true
 
       const due = parseIstNaive(t.due_at)
-      return t.status === 'in_progress' || (due && isToday(due))
+      return t.status === 'in_progress' || (!!due && istDateKey(due) === target)
     })
     // 🔴 ONLY WORK THAT IS YOURS TO DO. `GET /tasks/{id}` returns everything you
     // CREATED as well as everything ASSIGNED to you, so a lead's Today filled up

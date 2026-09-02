@@ -4,9 +4,9 @@ import { meetings as meetingsApi, tasks as tasksApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
 import {
-  dueLabel, isToday, istNow, parseIstNaive, timeLabel, isReallyOverdue } from '../../lib/format'
+  dueLabel,  istNow, parseIstNaive, timeLabel, isReallyOverdue, istDateKey, dayLabel} from '../../lib/format'
 import type { Meeting, Task } from '../../lib/types'
-import { completedToday, todayTimeline } from '../tasks/buckets'
+import { todayTimeline } from '../tasks/buckets'
 import { TaskCard } from '../tasks/TaskCard'
 import { useTaskActions } from '../tasks/useTaskActions'
 import { TaskDetail } from '../tasks/TaskDetail'
@@ -62,20 +62,25 @@ export function TodayScreen() {
    *  ("critical AND anytime") is a query nobody asked for, and two active rings
    *  would leave no way to tell what the list is showing. */
   const [pick, setPick] = useState<'overdue' | 'critical' | 'anytime' | 'done' | null>(null)
+  /** Which day this screen is showing. Defaults to today; the picker changes it,
+   *  and a task created while it is set lands on THAT day — a screen showing
+   *  Thursday that files new work under today would be quietly wrong. */
+  const [day, setDay] = useState<string>(() => istDateKey(istNow()))
+  const isTodayPicked = day === istDateKey(istNow())
 
   const allTasks = useMemo(() => t.data?.tasks ?? [], [t.data])
-  const timeline = useMemo(() => todayTimeline(allTasks), [allTasks])
-  const done = useMemo(() => completedToday(allTasks), [allTasks])
+  const timeline = useMemo(() => todayTimeline(allTasks, day), [allTasks, day])
+  const done = useMemo(() => timeline.filter(x => x.status === 'completed'), [timeline])
 
   const todaysMeetings = useMemo(() => (m.data?.meetings ?? [])
     .filter(x => {
       const at = parseIstNaive(x.scheduled_at)
-      return at && isToday(at) && x.status !== 'cancelled'
+      return at && istDateKey(at) === day && x.status !== 'cancelled'
     })
     .sort((a, b) =>
       (parseIstNaive(a.scheduled_at)?.getTime() ?? 0) -
       (parseIstNaive(b.scheduled_at)?.getTime() ?? 0)),
-  [m.data])
+  [m.data, day])
 
   /**
    * The counts run over the OPEN rows only.
@@ -187,6 +192,26 @@ export function TodayScreen() {
               create another: you had to go to Tasks. The bottom-right FAB slot is
               taken by floating Oscar (AppShell), so this goes inline rather than
               becoming a second FAB competing for the same thumb position. */}
+          {/* ── DAY PICKER ──────────────────────────────────────────────
+              A native date input, not a week strip: it reaches any day in two taps
+              including next month, needs no horizontal scrolling on a phone, and
+              inherits the platform's own calendar. "Today" beside it is the way
+              back — a picker you can leave but not return from is a trap. */}
+          <div className="mt-4 flex items-center gap-2">
+            <input type="date" value={day} onChange={e => setDay(e.target.value || day)}
+                   aria-label="Show a different day"
+                   className="rounded-lg border px-2.5 py-1.5 text-[13px]"
+                   style={{ background: 'var(--bg)', borderColor: 'var(--border)',
+                            color: 'var(--text)' }} />
+            {!isTodayPicked && (
+              <button type="button" onClick={() => setDay(istDateKey(istNow()))}
+                      className="rounded-lg px-2.5 py-1.5 text-[12.5px] font-semibold"
+                      style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+                Today
+              </button>
+            )}
+          </div>
+
           <div className="mt-5 sm:hidden">
             <Button variant="primary" onClick={() => setCreating(true)}
                     className="w-full">
@@ -260,7 +285,12 @@ export function TodayScreen() {
             work" in any sense a number next to this heading would convey — it read
             26 while only 6 things were actually scheduled. The pills above break it
             down honestly; a single total here could only mislead. */}
-        <SectionHeading>Your day</SectionHeading>
+        {/* Names the day when it is NOT today. A screen titled "Your day" while
+            showing next Tuesday is the kind of quiet wrongness that gets acted on —
+            somebody ticks off work that was never due yet. */}
+        <SectionHeading>
+          {isTodayPicked ? 'Your day' : dayLabel(parseIstNaive(`${day}T12:00:00`)!)}
+        </SectionHeading>
         {timeline.length === 0 ? (
           <Card>
             <EmptyState
@@ -328,7 +358,7 @@ export function TodayScreen() {
 
       {creating && (
 
-        <NewTaskSheet onClose={() => setCreating(false)}
+        <NewTaskSheet seedDate={day} onClose={() => setCreating(false)}
 
                       onCreated={() => { setCreating(false); t.reload() }} />
 

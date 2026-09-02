@@ -24,18 +24,23 @@ import type { Task } from '../../lib/types'
  * timezone, so sending an ISO string with a Z would land the task hours off — and
  * a due time in the past is born overdue, which fires a reminder immediately.
  */
-export function NewTaskSheet({ onClose, onCreated, task }: {
+export function NewTaskSheet({ onClose, onCreated, task, seedDate }: {
   onClose: () => void
   onCreated: () => void
   /** Present = edit that task. Absent = create a new one. */
   task?: Task | null
+  /** "YYYY-MM-DD" (IST) to open the date field on. Passed by a screen that already
+   *  has a day in view — Today, or a picked day on the calendar — so a task created
+   *  from there lands on the day the user was looking at rather than silently on
+   *  whatever today happens to be. Ignored when editing, which carries its own. */
+  seedDate?: string | null
 }) {
   const editing = Boolean(task)
   // Seeded from the task when editing. `due_at` arrives IST-naive
   // ("2026-08-24 18:30:00"), so it is SPLIT on the literal characters rather than
   // parsed into a Date — new Date(...) would apply the browser's offset and shift
   // the time the user sees by hours.
-  const seededDate = task?.due_at ? task.due_at.slice(0, 10) : null
+  const seededDate = task?.due_at ? task.due_at.slice(0, 10) : (seedDate ?? null)
   const seededTime = task?.due_at ? task.due_at.slice(11, 16) : null
   const me = getUser()
   /**
@@ -60,8 +65,19 @@ export function NewTaskSheet({ onClose, onCreated, task }: {
     // on it. Falls back to the primary for a task with no roster rows.
     const roster = (task?.assignees ?? []).map(a => a.user_id).filter(Boolean)
     if (roster.length) return roster
-    return task?.assigned_to_user_id ? [task.assigned_to_user_id] : []
+    if (task) return task.assigned_to_user_id ? [task.assigned_to_user_id] : []
+    // 🔴 A NEW TASK STARTS ASSIGNED TO YOU, VISIBLY. An empty list already MEANT
+    // self-assigned — create_item self-assigns when no assignee is given — but
+    // nothing on the form said so: every teammate chip sat unselected, so the
+    // honest reading was "assigned to nobody", and the most common action (a task
+    // for yourself) was the one with no visible state. Pre-selecting says what will
+    // happen, and deselecting yourself still resolves to you server-side.
+    return me?.id ? [me.id] : []
   })
+  /** Is this task going to someone OTHER than me? Yourself-only is not delegation,
+   *  and conflating the two is what would silently turn every personal task into a
+   *  team one now that you are pre-selected. */
+  const delegated = assignees.some(id => id !== me?.id)
   /**
    * Project task (default) vs personal — the same switch the Flutter sheet has, and
    * the web form simply never sent the field, so every task created here was a
@@ -81,7 +97,6 @@ export function NewTaskSheet({ onClose, onCreated, task }: {
   // An "anytime" task: due on a DAY, at no particular time. This is the real
   // representation — a null due_at is NOT (POST /items rejects it, and a dateless
   // task falls out of every date-grouped view including Today).
-  const [allDay, setAllDay] = useState<boolean>(!!task?.is_all_day)
   const [description, setDescription] = useState(task?.description ?? '')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -108,13 +123,21 @@ export function NewTaskSheet({ onClose, onCreated, task }: {
       // sentinel the rest of the product already uses for "end of this day", and
       // is_all_day is what tells the client (and the scheduler) that the time is a
       // placeholder rather than a deadline somebody chose.
-      const due_at = allDay ? `${date}T23:59:00` : `${date}T${time}:00`
+      // 🔴 NORMAL ⇒ ALL-DAY, derived rather than asked. There is no time field on a
+      // normal task any more, so there is no hour to store — 23:59 is the
+      // placeholder that records the DAY, and is_all_day is what marks it as a
+      // placeholder rather than a deadline. Critical is the inverse: it always
+      // carries the real time, and is_all_day on it is impossible (the backend
+      // coerces the pair, because a critical task with no hour has nothing to
+      // remind against).
+      const isAnytime = priority !== 'critical'
+      const due_at = isAnytime ? `${date}T23:59:00` : `${date}T${time}:00`
       if (task) {
         // Description is sent even when EMPTY, unlike on create: clearing a
         // description is a legitimate edit, and omitting the key would silently
         // leave the old text in place.
         await tasksApi.update(task.id, {
-          title: t, due_at, priority, is_all_day: allDay,
+          title: t, due_at, priority, is_all_day: isAnytime,
           description: description.trim(),
           // 🔴 Singular, not the list. PATCH /items {assigned_to_user_id} is the
           // path that reconciles pa_item_assignees through set_assignees — sending
@@ -128,15 +151,20 @@ export function NewTaskSheet({ onClose, onCreated, task }: {
           ...(description.trim() ? { description: description.trim() } : {}),
           due_at,
           priority,
-          is_all_day: allDay,
+          is_all_day: isAnytime,
           // Omitted when empty so the backend's own self-assign default applies,
           // rather than this client deciding what "nobody" means.
           ...(assignees.length ? { assigned_to_user_ids: assignees } : {}),
-          // 🔴 DELEGATED ⇒ ALWAYS A PROJECT TASK, mirroring the Flutter sheet
-          // (`_assigneeId == null ? _isProject : true`). Handing work to a teammate is
+          // 🔴 DELEGATED ⇒ ALWAYS A PROJECT TASK. Handing work to a teammate is
           // team work by definition, and a personal task assigned to someone else
           // would be invisible to the lead who has to track it.
-          is_project: assignees.length ? true : isProject,
+          //
+          // 🔴 But "delegated" means SOMEONE ELSE, not "has an assignee" — and that
+          // distinction became load-bearing the moment a new task started
+          // pre-assigned to you. `assignees.length ? true : isProject` was correct
+          // only while an empty list meant yourself; with yourself selected it made
+          // EVERY task a project task, publishing personal work to the team board.
+          is_project: delegated ? true : isProject,
         })
       }
       onCreated()
@@ -169,42 +197,51 @@ export function NewTaskSheet({ onClose, onCreated, task }: {
                    placeholder="What needs to be done?" />
           </Field>
 
-          <div className="grid grid-cols-2 gap-3">
+          {/* 🔴 NO TIME FIELD ON A NORMAL TASK. Priority here is scheduler
+              BEHAVIOUR, not a label: `critical` gets exactly one reminder at T-15
+              and is the only tier that alerts at all, while `normal` gets none,
+              ever. So a time on a normal task is a value nothing acts on — it
+              cannot produce a reminder, and it makes the row claim an hour the user
+              was never going to be held to. Asking for it invited the reasonable
+              assumption that setting it would do something.
+              Critical keeps the field, and REQUIRES it: the API rejects a critical
+              task with no due_at. */}
+          {priority === 'critical' ? (
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Date">
+                <input type="date" value={date} required
+                       onChange={e => setDate(e.target.value)}
+                       className={inputCls} style={inputStyle} />
+              </Field>
+              <Field label="Time">
+                <input type="time" value={time} required
+                       onChange={e => setTime(e.target.value)}
+                       className={inputCls} style={inputStyle} />
+              </Field>
+            </div>
+          ) : (
             <Field label="Date">
               <input type="date" value={date} required
                      onChange={e => setDate(e.target.value)}
                      className={inputCls} style={inputStyle} />
             </Field>
-            <Field label="Time">
-              <input type="time" value={time} required={!allDay} disabled={allDay}
-                     onChange={e => setTime(e.target.value)}
-                     className={inputCls}
-                     style={{ ...inputStyle, ...(allDay ? { opacity: .45 } : {}) }} />
-            </Field>
-          </div>
+          )}
 
-          {/* "Anytime" — the DATE stays required, only the clock time goes away.
-              `due_at` itself is still always sent (POST /items rejects null), so
-              this is not the "no time" option that used to fail: the day is carried
-              as 23:59 and `is_all_day` marks that as a placeholder. */}
-          <label className="flex cursor-pointer items-center gap-2.5 text-[13px]">
-            <input type="checkbox" checked={allDay}
-                   onChange={e => setAllDay(e.target.checked)}
-                   className="size-4 shrink-0 accent-[var(--accent)]" />
-            <span style={{ color: 'var(--text-muted)' }}>
-              Anytime that day — no particular time
-            </span>
-          </label>
-
+          {/* The "Anytime" checkbox is GONE — it is now derived from priority. It
+              asked the user to state something the priority already decides: normal
+              has no time field, so it is anytime by construction, and critical
+              always carries a real hour. Two controls for one fact meant they could
+              disagree (critical + anytime is impossible and the backend coerces it),
+              and the checkbox was the half with no consequence. */}
           {/* The hint is the literal scheduler behaviour, and it was wrong before:
               it promised a reminder 30 minutes ahead and another once overdue.
               Neither exists — the advance ping is T-15, and BOTH overdue checks are
               commented out of the scheduler loop, so nothing fires after a due time
               at any priority. Critical is also the only tier that alerts at all. */}
           <Field label="Priority"
-                 hint={allDay
-                   ? 'An anytime task gets no reminder — there is no time to remind you at.'
-                   : 'Critical gets one reminder 15 minutes ahead. Normal gets none.'}>
+                 hint={priority === 'critical'
+                   ? 'One reminder 15 minutes before the time you set.'
+                   : 'No time and no reminder — it just belongs to that day.'}>
             <div className="flex gap-1.5">
               {(['normal', 'critical'] as const).map(p => (
                 <button key={p} type="button" onClick={() => setPriority(p)}
@@ -258,7 +295,7 @@ export function NewTaskSheet({ onClose, onCreated, task }: {
           {/* Hidden once the task is delegated — the choice is irrelevant there, and
               offering a switch that cannot change the outcome is worse than none.
               Flutter hides it on the same condition. */}
-          {assignees.length === 0 && (
+          {!delegated && (
             <button type="button" onClick={() => setIsProject(v => !v)}
                     className="flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition"
                     style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}>
