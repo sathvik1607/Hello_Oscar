@@ -1,5 +1,16 @@
 # Deploy: feat/web-auth → internal/testing → developement-branch.onrender.com
 
+> ✅ **DONE — this is a historical record, not a runbook.** `feat/web-auth` shipped;
+> `developement-branch.onrender.com` serves it and the web app signs in against it.
+> Kept because the "behaviour changes that reach Flutter users" and "Rollback"
+> sections are still the record of what that deploy carried, and the SPA-rewrite
+> post-mortem at the bottom is the reason `vercel.json` looks the way it does.
+>
+> ⚠️ **It does NOT describe the current gap.** Five later backend commits
+> (`76ea79e`, `baa2daa`, `d39f7d8`, `722e15c`, `bd4d9c6`) sit on
+> `remove-rfq-from-oscar` and are **not** on any deployed branch — including
+> `X-App-Version`, which the web app's staleness check wants. See `VERCEL.md`.
+
 Everything is committed and verified. One command is yours to run, because
 `sathvik1607` is pull-only on `cbunny-2005/checking`:
 

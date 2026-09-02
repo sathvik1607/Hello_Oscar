@@ -39,8 +39,11 @@ cd web && npm run build           # tsc -b && vite build → web/dist
 npm run preview                   # serve dist locally on 5174
 ```
 
-`dist/` is static: any host, no rewrite rule needed (the app uses a hash router
-precisely so it survives being served from an arbitrary path).
+`dist/` is static, but 🔴 **a rewrite rule IS required** — the app moved from a hash
+router to real paths, so `/tasks` is a request for a file that does not exist. See
+`VERCEL.md`; the pattern must also **exclude `assets/`**, or a browser holding a
+previous `index.html` gets `200 OK`+HTML for a deleted chunk and renders a blank
+page.
 
 ---
 
@@ -70,6 +73,28 @@ The web app is correct either way. Until the flag is on, the backend's documente
 system-wide IDOR is still open for callers that simply omit the token — the flag is
 the fix, and the token layer is what makes the flag possible. Flip it once the
 mobile client sends one too.
+
+---
+
+## Deploys and staleness
+
+A long-lived tab is the normal case here, so a deploy leaves real users running a
+bundle the server no longer has. Three independent detectors handle it — the asset
+check and the `X-App-Version` header watcher in `lib/freshness.ts`, plus
+`shell/ErrorBoundary.tsx` catching the crash itself with one `sessionStorage`-guarded
+reload. Details and the traps in `VERCEL.md`.
+
+Two backend requirements come with it:
+
+* `expose_headers` must include **`X-App-Version`** — a cross-origin response header
+  JS has not been told it may read is invisible, with no error.
+* The header is **absent** when neither `RENDER_GIT_COMMIT` nor `APP_BUILD_ID` is
+  set (i.e. always, locally). A missing header means "no information", never stale.
+
+⚠️ **`X-App-Version` is not on the deployed backend yet.** It is committed on
+`remove-rfq-from-oscar`, which `Developement_BRANCH` does not serve, so detector #2
+is currently inert and the asset check carries the load. That is a deploy gap, not a
+bug — both degrade correctly.
 
 ---
 
@@ -155,3 +180,11 @@ also mean rewriting the working pipeline, so it is documented rather than attemp
   is an agenda rather than a free-space finder.
 * **Chat history is server-only** — no offline cache, so the transcript needs a
   connection. The mobile client keeps a local copy; this does not.
+* **`is_overdue` is re-checked client-side**, via `isOverdue()` in `lib/format.ts`,
+  which ANDs in `!is_all_day`. The backend now does the same (`bd4d9c6`) but that
+  commit is not on a deployed branch, so without the client guard every "anytime"
+  task would flip to overdue the day after it was created — against a 23:59
+  placeholder nobody chose. Keep the guard; it is correct against both backends.
+* **The backend URL is compiled in**, so pointing the app elsewhere is a redeploy.
+  Moving it to a runtime `/config.json` or an `/api/*` Vercel rewrite would remove
+  the whole class of URL bugs described in `VERCEL.md`; not done.
