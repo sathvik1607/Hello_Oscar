@@ -91,15 +91,34 @@ export function groupTasks(tasks: Task[]): Record<BucketId, Task[]> {
   return out
 }
 
-/** Today's timeline: what is due today plus anything already overdue, because an
- *  overdue task IS today's problem. Mirrors the Flutter Today screen, which keeps
- *  one flat time-ordered list rather than categories. */
+/**
+ * Today's timeline: what is due TODAY. One flat, time-ordered list.
+ *
+ * 🔴 PREVIOUS DAYS' WORK IS NOT INCLUDED, and that is a reversal. This used to pull
+ * in everything overdue as well, on the reasoning that an overdue task is still
+ * today's problem. In practice it made the screen useless: measured on a real
+ * account, 29 of 39 rows were from earlier dates, so "Today" opened on tasks from
+ * three days ago and the day's actual work sat below the fold. A day view that is
+ * three-quarters not-today is not a day view.
+ *
+ * `in_progress` is still included whatever its date — work someone has actively
+ * started is in play now by definition, and dropping it mid-flight would be worse
+ * than showing it a day late.
+ *
+ * ⚠️ ACCEPTED COST: a task due yesterday and untouched no longer appears here. It is
+ * not lost — it is in Tasks and on the Calendar under its own date — but nothing
+ * SURFACES it any more, because the backend's roll-forward is disabled
+ * (`_roll_over_previous_dues` is commented out of the scheduler loop), so its due_at
+ * never moves on its own. Surfacing stale work again means either re-enabling that
+ * or giving this screen its own "earlier" section; both are deliberate product
+ * decisions rather than something to slip in here.
+ */
 export function todayTimeline(tasks: Task[]): Task[] {
   return tasks
     .filter(isActive)
     .filter(t => {
       const due = parseIstNaive(t.due_at)
-      return isReallyOverdue(t) || t.status === 'in_progress' || (due && isToday(due))
+      return t.status === 'in_progress' || (due && isToday(due))
     })
     .sort(byDueAsc)
 }
