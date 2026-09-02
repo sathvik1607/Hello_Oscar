@@ -37,6 +37,15 @@ export default defineConfig({
     // log. strictPort makes that a startup error instead of a mystery.
     port: 5174,
     strictPort: true,
+    watch: {
+      // 🔴 tsc -b's incremental caches live in this directory, and `npm run
+      // typecheck`/`build` rewrite them. Vite watches the project ROOT, not just
+      // src/, so each rewrite looked like a source change and triggered an HMR
+      // FULL RELOAD — the dev page appearing to "constantly refresh" while
+      // nothing in src/ had changed. .gitignore alone is not enough: Vite's
+      // watcher does not consult it for files already on disk.
+      ignored: ['**/*.tsbuildinfo'],
+    },
   },
   build: {
     // Voice is the one thing that must not stutter, and it is the largest chunk.

@@ -81,48 +81,43 @@ export async function checkFreshness(): Promise<Freshness> {
   }
 }
 
-// ── build identity ──────────────────────────────────────────────────────────
+// ── the server's build, for DIAGNOSTICS ONLY ────────────────────────────────
 
 /**
- * The build this code was compiled from — a git sha on Vercel, a timestamp
- * locally. See vite.config.ts.
- *
- * Compared for EQUALITY only. It is never ordered or parsed, so "newer" is not a
- * question this can answer — only "different", which is the only question that
- * matters for staleness.
+ * The build this bundle was compiled from — a git sha on Vercel, a timestamp
+ * locally. See vite.config.ts. Reported in the UI so "which version is that user
+ * on?" is answerable.
  */
 export const BUILD_ID: string =
   typeof __BUILD_ID__ === 'string' ? __BUILD_ID__ : 'unknown'
 
 /**
- * The build the SERVER is currently running, as reported by `X-App-Version` on any
- * API response.
+ * The BACKEND's build, as reported by `X-App-Version` on any API response.
  *
- * 🔴 Read off responses the app was making anyway — no poll, no /version endpoint,
- * no extra request. A version check that costs a request gets set to a long
- * interval and then detects staleness minutes late; one that rides existing
- * traffic is immediate and free.
+ * 🔴 THIS IS NOT A STALENESS SIGNAL, AND USING IT AS ONE WAS A BUG.
  *
- * Null until a response carries the header, which also covers a backend that does
- * not send it — in which case this whole path stays quiet rather than guessing.
+ * `BUILD_ID` is a commit in *this* repo (Hello_Oscar). `X-App-Version` is a commit
+ * in the *backend* repo (AlumnxAILabs_epa). They are different histories, so they
+ * can NEVER be equal — an equality test therefore reports "stale" on the very
+ * first API response and never stops. The banner would appear permanently, on a
+ * perfectly current build, and reloading would not clear it.
+ *
+ * It was dormant only by accident: the deployed backend does not send the header
+ * yet (that commit is unmerged), so nothing had ever called this with a value. It
+ * would have started firing for every user the moment the backend deployed.
+ *
+ * What a backend redeploy actually means for this tab is: nothing. Our bundle is
+ * not stale because the server restarted. Staleness of THIS code is what
+ * `checkFreshness()` measures, by comparing our own asset names against the live
+ * index.html — same repo, same build, a comparison that can be true or false.
+ *
+ * So this is kept for display only. Nothing subscribes for a reload prompt.
  */
 let serverBuild: string | null = null
 
-const buildListeners = new Set<(mismatch: boolean) => void>()
-
 /** Called by the api layer for every response. Cheap and idempotent. */
 export function noteServerBuild(v: string | null) {
-  if (!v || v === serverBuild) return
-  serverBuild = v
-  // Only a CONFIRMED disagreement counts. An unknown local build (a dev bundle
-  // built before this existed) must not report a mismatch against every response.
-  const mismatch = BUILD_ID !== 'unknown' && v !== BUILD_ID
-  buildListeners.forEach(f => f(mismatch))
+  if (v) serverBuild = v
 }
 
 export const serverBuildId = () => serverBuild
-export function watchBuildMismatch(fn: (mismatch: boolean) => void): () => void {
-  buildListeners.add(fn)
-  if (serverBuild) fn(BUILD_ID !== 'unknown' && serverBuild !== BUILD_ID)
-  return () => buildListeners.delete(fn)
-}

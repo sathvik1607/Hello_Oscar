@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Loader2, RefreshCw, WifiOff } from 'lucide-react'
 import { connectionState, watchConnection, type ConnState } from '../lib/appSocket'
-import { checkFreshness, watchBuildMismatch } from '../lib/freshness'
+import { checkFreshness } from '../lib/freshness'
 
 /**
  * The live-connection state, stated plainly.
@@ -35,21 +35,26 @@ export function ConnectionBanner() {
    * is when a long-lived tab is most likely to have gone stale. No polling: a
    * background timer hitting the origin every minute for the life of a tab costs
    * more than it is worth.
+   *
+   * Note this is INERT in dev — Vite serves unhashed modules, so OWN_ASSETS is
+   * empty and checkFreshness() returns 'unknown'. A dev page that keeps reloading
+   * is Vite's HMR, not this.
    */
   useEffect(() => {
     let alive = true
-    const run = () => { void checkFreshness().then(f => { if (alive) setStale(f === 'stale') }) }
+    // 🔴 LATCHED — `setStale(true)` only, never `setStale(f === 'stale')`.
+    // checkFreshness() returns 'unknown' on any transient failure (offline, a
+    // proxy hiccup, a slow origin), so assigning its result directly let a
+    // showing banner turn itself back OFF on the next probe. That both hid a
+    // real problem and, because the bar is in the layout flow, shifted the whole
+    // page down and up — a visible flicker. A build cannot un-stale itself.
+    const run = () => { void checkFreshness().then(f => { if (alive && f === 'stale') setStale(true) }) }
     run()
     const onVis = () => { if (document.visibilityState === 'visible') run() }
     document.addEventListener('visibilitychange', onVis)
-    // The cheaper, faster signal: X-App-Version on responses the app was already
-    // making. Either source is sufficient — the header catches it on the very next
-    // request, the asset check covers a backend that sends no header at all.
-    const unwatch = watchBuildMismatch(m => { if (alive && m) setStale(true) })
     return () => {
       alive = false
       document.removeEventListener('visibilitychange', onVis)
-      unwatch()
     }
   }, [])
 

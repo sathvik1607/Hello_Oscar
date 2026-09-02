@@ -10,7 +10,7 @@ import { TodayScreen } from './features/today/TodayScreen'
 import { VoiceProvider } from './features/voice/VoiceProvider'
 import { Spinner } from './ui'
 import { ErrorBoundary } from './shell/ErrorBoundary'
-import { checkFreshness, watchBuildMismatch } from './lib/freshness'
+import { checkFreshness } from './lib/freshness'
 
 /**
  * Root. Two states — signed out and signed in — and a path router.
@@ -119,11 +119,14 @@ export default function App() {
    * Stale-code detection. Sends the tab to the login screen with a one-line
    * notice — see the `staleVersion` branch below.
    *
-   * Two independent detectors, either sufficient:
-   *  · X-App-Version on any API response — immediate and free, since it rides
-   *    requests the app was making anyway.
-   *  · an asset-hash comparison against a re-fetched index.html — covers a backend
-   *    that sends no such header, and catches a tab whose first action is a reload.
+   * ONE detector: an asset-hash comparison against a re-fetched index.html.
+   *
+   * 🔴 There used to be a second, comparing our build id against the backend's
+   * `X-App-Version`. It was removed because it compared shas from TWO DIFFERENT
+   * REPOS, so it could never match and would have reported a permanent false
+   * "stale" the moment the backend deployed that header. A backend redeploy does
+   * not make this bundle stale; only a WEB deploy does, which is what the asset
+   * comparison measures.
    *
    * Re-probed when the tab regains focus, which is when a long-lived tab is most
    * likely to have gone stale. Latched: a build cannot un-stale itself, and letting
@@ -132,14 +135,12 @@ export default function App() {
   useEffect(() => {
     let alive = true
     const mark = () => { if (alive) setStaleVersion(true) }
-    const unwatch = watchBuildMismatch(m => { if (m) mark() })
     const probe = () => { void checkFreshness().then(f => { if (f === 'stale') mark() }) }
     probe()
     const onVis = () => { if (document.visibilityState === 'visible') probe() }
     document.addEventListener('visibilitychange', onVis)
     return () => {
       alive = false
-      unwatch()
       document.removeEventListener('visibilitychange', onVis)
     }
   }, [])

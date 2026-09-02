@@ -2,3 +2,9 @@ node_modules
 dist
 *.local
 .DS_Store
+
+# tsc -b incremental caches. NEVER tracked and never in the watched root's
+# git index: every `npm run typecheck` or `build` rewrites them, Vite sees a
+# change in the project root and issues an HMR FULL RELOAD. That presents as the
+# dev page "constantly refreshing" while nothing in src/ changed.
+*.tsbuildinfo
