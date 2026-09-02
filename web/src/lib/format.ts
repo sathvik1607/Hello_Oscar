@@ -204,3 +204,26 @@ export function lastSeenLabel(iso: string | null | undefined): string {
   if (istDateKey(d) === istDateKey(y)) return `last seen yesterday at ${t}`
   return `last seen ${dayLabel(d)} at ${t}`
 }
+
+// ── priority ────────────────────────────────────────────────────────────────
+
+/**
+ * Is this task's priority worth showing a badge for?
+ *
+ * The backend stores TWO tiers, `normal` and `critical`, but old rows still carry
+ * the legacy `low`/`medium`/`high` and nothing rewrites them. So a screen cannot
+ * just test `!== 'medium'` (what the code did before the migration) — against a
+ * current backend that is true for EVERY task, which put a grey, meaningless badge
+ * on all of them.
+ *
+ * Only escalation earns a badge. `normal`/`medium`/`low` are the quiet default and
+ * say nothing a reader needs; `critical`/`high` is the one that changes behaviour
+ * (it is the only tier that gets a reminder at all).
+ */
+export const isEscalated = (p: string | null | undefined) =>
+  p === 'critical' || p === 'high'
+
+/** What to print in the badge. Legacy `high` is shown as `critical` so two tasks
+ *  that behave identically don't appear to be different things. */
+export const priorityLabel = (p: string | null | undefined) =>
+  p === 'high' ? 'critical' : (p ?? '')

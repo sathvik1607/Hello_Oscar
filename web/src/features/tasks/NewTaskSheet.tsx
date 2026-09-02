@@ -72,8 +72,16 @@ export function NewTaskSheet({ onClose, onCreated, task }: {
   const [title, setTitle] = useState(task?.title ?? '')
   const [date, setDate] = useState(seededDate ?? istDateKey(istNow()))
   const [time, setTime] = useState(seededTime ?? defaultTime())
-  const [priority, setPriority] = useState<'low' | 'medium' | 'high'>(
-    (task?.priority as 'low' | 'medium' | 'high') ?? 'medium')
+  // TWO tiers on the wire. The legacy words are still ACCEPTED by the backend
+  // (services/priority.py aliases high→critical, medium/low→normal), which is what
+  // lets an old build keep working — but a current build should send the honest
+  // names, and an existing task may still carry a legacy one, so normalise on read.
+  const [priority, setPriority] = useState<'normal' | 'critical'>(
+    task?.priority === 'critical' || task?.priority === 'high' ? 'critical' : 'normal')
+  // An "anytime" task: due on a DAY, at no particular time. This is the real
+  // representation — a null due_at is NOT (POST /items rejects it, and a dateless
+  // task falls out of every date-grouped view including Today).
+  const [allDay, setAllDay] = useState<boolean>(!!task?.is_all_day)
   const [description, setDescription] = useState(task?.description ?? '')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -96,13 +104,18 @@ export function NewTaskSheet({ onClose, onCreated, task }: {
       // browser's timezone never enters the value.
       // Built from the date/time PARTS, so the browser's timezone never enters
       // the value. IST-naive is what the backend stores.
-      const due_at = `${date}T${time}:00`
+      // An anytime task still carries a due_at — it names the day. 23:59 matches the
+      // sentinel the rest of the product already uses for "end of this day", and
+      // is_all_day is what tells the client (and the scheduler) that the time is a
+      // placeholder rather than a deadline somebody chose.
+      const due_at = allDay ? `${date}T23:59:00` : `${date}T${time}:00`
       if (task) {
         // Description is sent even when EMPTY, unlike on create: clearing a
         // description is a legitimate edit, and omitting the key would silently
         // leave the old text in place.
         await tasksApi.update(task.id, {
-          title: t, due_at, priority, description: description.trim(),
+          title: t, due_at, priority, is_all_day: allDay,
+          description: description.trim(),
           // 🔴 Singular, not the list. PATCH /items {assigned_to_user_id} is the
           // path that reconciles pa_item_assignees through set_assignees — sending
           // the plural here would move the legacy column and leave the roster
@@ -115,6 +128,7 @@ export function NewTaskSheet({ onClose, onCreated, task }: {
           ...(description.trim() ? { description: description.trim() } : {}),
           due_at,
           priority,
+          is_all_day: allDay,
           // Omitted when empty so the backend's own self-assign default applies,
           // rather than this client deciding what "nobody" means.
           ...(assignees.length ? { assigned_to_user_ids: assignees } : {}),
@@ -162,20 +176,37 @@ export function NewTaskSheet({ onClose, onCreated, task }: {
                      className={inputCls} style={inputStyle} />
             </Field>
             <Field label="Time">
-              <input type="time" value={time} required
+              <input type="time" value={time} required={!allDay} disabled={allDay}
                      onChange={e => setTime(e.target.value)}
-                     className={inputCls} style={inputStyle} />
+                     className={inputCls}
+                     style={{ ...inputStyle, ...(allDay ? { opacity: .45 } : {}) }} />
             </Field>
           </div>
 
-          {/* 🔴 There is deliberately no "no time" option. `due_at` is REQUIRED by
-              POST /items — measured: null and omitted both return 400 — because the
-              planner is time-ordered. Offering the choice produced a form that
-              always failed for anyone who ticked it. */}
+          {/* "Anytime" — the DATE stays required, only the clock time goes away.
+              `due_at` itself is still always sent (POST /items rejects null), so
+              this is not the "no time" option that used to fail: the day is carried
+              as 23:59 and `is_all_day` marks that as a placeholder. */}
+          <label className="flex cursor-pointer items-center gap-2.5 text-[13px]">
+            <input type="checkbox" checked={allDay}
+                   onChange={e => setAllDay(e.target.checked)}
+                   className="size-4 shrink-0 accent-[var(--accent)]" />
+            <span style={{ color: 'var(--text-muted)' }}>
+              Anytime that day — no particular time
+            </span>
+          </label>
 
-          <Field label="Priority" hint="High gets a reminder 30 minutes ahead; low gets none until it's overdue.">
+          {/* The hint is the literal scheduler behaviour, and it was wrong before:
+              it promised a reminder 30 minutes ahead and another once overdue.
+              Neither exists — the advance ping is T-15, and BOTH overdue checks are
+              commented out of the scheduler loop, so nothing fires after a due time
+              at any priority. Critical is also the only tier that alerts at all. */}
+          <Field label="Priority"
+                 hint={allDay
+                   ? 'An anytime task gets no reminder — there is no time to remind you at.'
+                   : 'Critical gets one reminder 15 minutes ahead. Normal gets none.'}>
             <div className="flex gap-1.5">
-              {(['low', 'medium', 'high'] as const).map(p => (
+              {(['normal', 'critical'] as const).map(p => (
                 <button key={p} type="button" onClick={() => setPriority(p)}
                         className="flex-1 rounded-lg border py-2 text-[13px] font-medium capitalize transition"
                         style={priority === p

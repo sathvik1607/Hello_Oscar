@@ -11,8 +11,7 @@ import { useUnreadComments } from './useUnreadComments'
 import { NewTaskSheet } from './NewTaskSheet'
 import { useTaskActions } from './useTaskActions'
 import {
-  Button, Card, EmptyState, ErrorState, SectionHeading, Skeleton,
-} from '../../ui'
+  Button, Card, EmptyState, ErrorState, SectionHeading, Skeleton, TruncatedNotice } from '../../ui'
 
 /**
  * Everything on your plate, in the product's order:
@@ -289,10 +288,12 @@ export function TasksScreen({ target }: {
                 </SectionHeading>
                 <div className="space-y-2">
                   {sec.tasks.map(t => (
-                    <div id={`task-${t.id}`} className="rounded-2xl transition"
+                    // The key belongs on the OUTERMOST element the map returns —
+                    // it was on the TaskCard inside, which React does not see.
+                    <div key={t.id} id={`task-${t.id}`} className="rounded-2xl transition"
                          style={glow === t.id
                            ? { boxShadow: '0 0 0 2px var(--accent)' } : undefined}>
-                      <TaskCard key={t.id} task={t} busy={busyId === t.id}
+                      <TaskCard task={t} busy={busyId === t.id}
                               onToggle={() => void toggle(t)}
                               onOpen={() => { comments.markSeen(t.id); setOpenTask(t) }}
                         unreadComments={comments.byItem.get(t.id)} showAssignee />
@@ -301,6 +302,9 @@ export function TasksScreen({ target }: {
                 </div>
               </section>
             ))}
+            {/* The server cut the list. Saying so is the whole point — see
+                TruncatedNotice. */}
+            {source.data?.truncated && <TruncatedNotice />}
           </div>
         )
       )}

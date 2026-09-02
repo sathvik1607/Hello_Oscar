@@ -87,10 +87,21 @@ export function PersonalizeScreen() {
       await tasksApi.create({
         title: t.title,
         ...(t.description ? { description: t.description } : {}),
-        // due_at comes back IST-naive (or null) — passed straight through. Parsing
-        // and re-serialising it here would be two chances to shift it.
+        // due_at comes back IST-naive — passed straight through. Parsing and
+        // re-serialising it here would be two chances to shift it.
         due_at: t.due_at,
         priority: t.priority,
+        // 🔴 Both of these MUST be forwarded, and neither is cosmetic.
+        //
+        // is_project: POST /items DEFAULTS IT TO TRUE. A suggestion is derived from
+        // the user's private notes, so dropping this key published "gym at 6am" to
+        // the team lead's My Team board (GET /teams/{id}/tasks?project=true).
+        //
+        // is_all_day: an anytime suggestion carries 23:59 as a PLACEHOLDER. Without
+        // the flag that placeholder becomes a hard 11:59pm deadline — and on a
+        // `critical` task it would also arm a T-15 reminder for 11:45pm.
+        is_project: t.is_project,
+        is_all_day: t.is_all_day,
       })
       setAccepted(prev => new Set(prev).add(i))
     } catch (e) {
@@ -208,9 +219,16 @@ export function PersonalizeScreen() {
                       <div className="text-[14.5px] font-medium leading-snug">{t.title}</div>
                       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                         <span className="text-xs tabular-nums" style={{ color: 'var(--text-muted)' }}>
-                          {due ? dueLabel(due) : 'No time set'}
+                          {/* `due_at` is never null now, so the old `: 'No time set'`
+                              fallback was unreachable and every anytime suggestion
+                              read "11:59 pm". is_all_day is what distinguishes a
+                              placeholder from a time the user actually wants. */}
+                          {t.is_all_day ? 'Anytime' : due ? dueLabel(due) : 'Anytime'}
                         </span>
-                        {t.priority !== 'medium' && <Badge tone={t.priority}>{t.priority}</Badge>}
+                        {/* `normal` is the quiet default and carries no signal worth a
+                            badge — same reason the old code hid `medium`. Only
+                            `critical` earns one. */}
+                        {t.priority === 'critical' && <Badge tone={t.priority}>{t.priority}</Badge>}
                       </div>
                       {/* WHY it suggested this. Without it the plan is a list of
                           orders; with it, it is reasoning you can disagree with. */}

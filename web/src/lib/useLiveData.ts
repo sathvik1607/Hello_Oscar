@@ -62,12 +62,24 @@ export function useLiveData(
 }
 
 /** `task.completed` → `task.*`, so a caller can subscribe to a whole family
- *  instead of listing every operation and forgetting one. */
+ *  instead of listing every operation and forgetting one.
+ *
+ *  🔴 Only the LAST dot is a family boundary, and using the first one was a real
+ *  bug: `task.comment.created` collapsed to `task.*`, so every comment posted on
+ *  any of the viewer's tasks invalidated `tasks:`/`meetings:` and refetched the
+ *  whole list on five screens. Completing a task writes an activity comment, so a
+ *  single completion fired `task.completed` AND `task.comment.created` — two full
+ *  refetches per action. Splitting on the last dot makes the comment frame its own
+ *  family (`task.comment.*`), which is what the thread views already listen for. */
 function prefixOf(type: string): string {
-  const i = type.indexOf('.')
+  const i = type.lastIndexOf('.')
   return i === -1 ? type : `${type.slice(0, i)}.*`
 }
 
-/** Everything that changes a task or a meeting. */
+/** Everything that changes a task or a meeting.
+ *
+ *  Deliberately NOT including `task.comment.*`: a comment does not change any field
+ *  a task list renders, so refetching every task because somebody typed in a thread
+ *  is pure waste. Thread views subscribe to the comment frame themselves. */
 export const ITEM_FRAMES = ['task.*', 'meeting.*'] as const
 export const ITEM_CACHES = ['tasks:', 'meetings:'] as const

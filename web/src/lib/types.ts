@@ -29,7 +29,15 @@ export type LoginResponse = {
   user: SessionUser
 }
 
-export type Priority = 'low' | 'medium' | 'high'
+/** TWO tiers. `services/priority.py` normalises everything the backend stores to
+ *  'normal' | 'critical' — high→critical, medium/low→normal — so those are the only
+ *  values a current backend ever SENDS. The legacy three stay in the union because
+ *  rows are not rewritten: nothing re-serialises an old row, and the aliases are
+ *  still accepted on write. Read defensively, write the honest names.
+ *
+ *  Priority is scheduler BEHAVIOUR, not a label: `critical` gets exactly one
+ *  reminder at T-15 and requires a due_at; `normal` gets none, ever. */
+export type Priority = 'normal' | 'critical' | 'low' | 'medium' | 'high'
 export type ItemStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled' | 'blocked'
 
 export type Assignee = {
@@ -50,6 +58,12 @@ export type Task = {
    *  backend stores the IST wall-clock with no tzinfo, so `new Date(due_at)` would
    *  be reinterpreted in the browser's zone. See parseIstNaive() in format.ts. */
   due_at: string | null
+  /** 🔴 NOT `due_at === null`. An all-day task still carries a due_at — it names the
+   *  DAY, and the time component is a placeholder (23:59 from plan-day). A dateless
+   *  task falls out of every date-grouped view, which is why null is not the
+   *  representation. False on every pre-migration row, so the 23:59 sentinel is
+   *  still worth honouring for old rows. */
+  is_all_day: boolean
   due_label: string | null
   completed_at: string | null
   created_at: string | null
@@ -72,6 +86,23 @@ export type Task = {
   is_project?: boolean | number
   risk_flag?: number
   item_type?: 'task' | 'meeting'
+  /** "14 of 307 done" — the rollup the roster is capped to avoid shipping. */
+  completed_count?: number
+  pending_count?: number
+  root_task_id?: number | null
+  escalation_level?: number
+  /** Carried forward from a previous day by the scheduler.
+   *
+   *  🔴 The bool alone CANNOT answer the question worth asking. `spilled_over_at` is
+   *  never cleared on a manual reschedule, so it means "was carried at some point",
+   *  not "still needs attention". Compare it against `updated_at`: still roughly
+   *  equal ⇒ untouched since the roll ⇒ worth prompting; `updated_at` clearly later
+   *  ⇒ the user has already set their own time ⇒ historical, stay quiet.
+   *
+   *  ⚠️ Spill-over is DISABLED on the backend as of 2026-08-29, so nothing new is
+   *  stamped. A flag in the wild is historical only. */
+  spilled_over?: boolean
+  spilled_over_at?: string | null
 }
 
 export type Meeting = {
@@ -87,6 +118,21 @@ export type Meeting = {
   assigned_to_user_id?: number | null
   assigned_to_name?: string | null
   attendee_user_ids?: number[] | null
+  owner_user_id?: number | null
+  owner_name?: string | null
+  /** 🔴 "Is this mine, or was I invited?" — computed server-side per CALLER. The
+   *  task list answers this with `is_mine`; for meetings this is the field. Do not
+   *  re-derive it from `assigned_to_user_id`, which names only the primary invitee
+   *  and so answers wrong for everyone else on a multi-invitee meeting. */
+  viewer_role?: 'owner' | 'invitee' | null
+  /** Pre-formatted for display, IST, computed once server-side. */
+  date?: string | null
+  date_label?: string | null
+  time?: string | null
+  end_time?: string | null
+  duration_min?: number | null
+  is_today?: boolean
+  is_tomorrow?: boolean
 }
 
 export type TaskComment = {
@@ -132,16 +178,38 @@ export type Note = {
   /** The wire field is `content`, not `body`. `pa_personal_notes.body` exists in the
    *  database, is 100% NULL, and is a leftover from a pre-ship redesign. */
   content: string
+  /** 🔴 These two are in DIFFERENT ZONES and that is intentional, not a bug:
+   *  `created_at` carries +00:00, `updated_at` carries +05:30 (it is written by
+   *  notes_service._now(), which is IST). Both arrive with an explicit offset, so
+   *  `new Date(...)` is correct for each — do NOT "normalise" them to one zone or
+   *  push either through a naive-UTC parser, which is wrong by 5:30 either way. */
   created_at: string | null
   updated_at: string | null
 }
 
 export type PlannedTask = {
   title: string
-  due_at: string | null
+  /** 🔴 NEVER null any more. A suggestion with no time from the model becomes 23:59
+   *  on the plan date, flagged `is_all_day`. It used to be null, which dropped the
+   *  suggestion out of every date-grouped view in the app — it is still a task for
+   *  that DAY. So a `due_at ? … : 'No time set'` branch is now dead code; read
+   *  `is_all_day` instead. */
+  due_at: string
+  /** True ⇒ the 23:59 above is a placeholder, not a deadline the user chose. */
+  is_all_day: boolean
+  /** 🔴 ALWAYS false, and it MUST be forwarded to POST /items. A suggestion is
+   *  derived from the user's PRIVATE notes, so it is personal by definition — and
+   *  POST /items defaults is_project to TRUE, so a caller that drops this key puts
+   *  someone's private note on the team lead's My Team board. */
+  is_project: boolean
+  /** Derived from is_all_day server-side, never asked of the model: all-day →
+   *  'normal', timed → 'critical'. */
   priority: Priority
   description: string | null
   reasoning: string | null
+  /** Which note this came from — traceability, and what the backend uses to enforce
+   *  weekday-only notes. */
+  source_note_id: number | null
 }
 
 export type PlanDayResponse = {
@@ -164,6 +232,9 @@ export type AppNotification = {
   /** A plain int, NOT a foreign key — rows pointing at deleted items exist, so a
    *  deep-link from the bell can legitimately resolve to nothing. */
   item_id: number | null
+  /** Set on update_request / update_response rows, where `item_id` is null — so a
+   *  bell tap on those can only resolve through THIS field. */
+  update_request_id: number | null
   created_at: string | null
   read_at: string | null
 }

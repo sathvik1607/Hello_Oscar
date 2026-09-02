@@ -156,6 +156,15 @@ const TONES: Record<string, { bg: string; fg: string }> = {
   completed:   { bg: 'rgba(34,197,94,.13)',   fg: '#15803D' },
   cancelled:   { bg: 'rgba(148,163,184,.16)', fg: '#64748B' },
   blocked:     { bg: 'rgba(239,68,68,.12)',   fg: '#DC2626' },
+  // Two-tier priority. `critical` reuses the old `high` red — same meaning, same
+  // colour on both surfaces. `normal` is the quiet default and is not normally
+  // badged at all; the tone exists so a stray one renders grey rather than falling
+  // through to `neutral` by accident.
+  critical:    { bg: 'rgba(239,68,68,.12)',   fg: '#DC2626' },
+  normal:      { bg: 'rgba(148,163,184,.16)', fg: '#64748B' },
+  // The legacy three. Rows written before the migration still carry these, and
+  // nothing rewrites them — so these keys must stay or an old task's badge goes
+  // grey-on-grey with no colour at all.
   high:        { bg: 'rgba(239,68,68,.12)',   fg: '#DC2626' },
   medium:      { bg: 'rgba(245,158,11,.14)',  fg: '#B45309' },
   low:         { bg: 'rgba(148,163,184,.16)', fg: '#64748B' },
@@ -311,3 +320,23 @@ export function Portal({ children }: { children: ReactNode }) {
   return createPortal(children, host)
 }
 export { Linkify } from './Linkify'
+
+/**
+ * "This list is not everything."
+ *
+ * The task list routes cap at 2000 rows server-side and return `truncated: true`
+ * when they cut. The cap is a deliberate backstop — one runaway account must not
+ * time out the endpoint for everybody — so the bug was never the cap, it was
+ * cutting SILENTLY: a 100-row version of it rendered whole months of the calendar
+ * as empty, and nothing on screen said why. A list the user is told about is a big
+ * account; one they are not told about is data that "disappeared".
+ */
+export function TruncatedNotice({ shown }: { shown?: number }) {
+  return (
+    <div className="mt-2 rounded-lg px-3 py-2 text-[12px]"
+         style={{ background: 'rgba(245,158,11,.10)', color: '#B45309' }}>
+      Showing the most recent {shown ?? 2000}. Some older items aren’t listed —
+      narrow the view to see them.
+    </div>
+  )
+}

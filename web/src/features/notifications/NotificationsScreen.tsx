@@ -103,6 +103,9 @@ export function NotificationsScreen({ onNavigate }: {
       message: String(p.message ?? ''),
       is_read: 0,
       item_id: p.item_id != null ? Number(p.item_id) : null,
+      // The frame does not carry it, and a synthesized row must not pretend
+      // otherwise — the refetch that follows replaces this with the real row.
+      update_request_id: null,
       created_at: new Date().toISOString(),
       read_at: null,
     }, ...prev])

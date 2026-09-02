@@ -152,38 +152,59 @@ export const auth = {
       '/auth/join-team', { method: 'POST', body: { user_id: requireUserId(), invite_code } }),
 }
 
+/**
+ * Every task-list response.
+ *
+ * `truncated` is the server telling you it cut the list at its row cap. It is
+ * additive and may be absent from an older backend, so it is optional — but where
+ * it is true the UI must say so. A silently cut list is the bug that emptied whole
+ * months of the calendar; a cut list the user is TOLD about is merely a big account.
+ */
+export type TaskList = { count: number; tasks: Task[]; truncated?: boolean }
+
 // ── tasks ────────────────────────────────────────────────────────────────────
 
 export const tasks = {
   /** Everything this user CREATED plus everything ASSIGNED to them, deduped
    *  server-side. This is the home-screen call: fetching only created-tasks is how
-   *  delegated work used to be invisible. */
+   *  delegated work used to be invisible.
+   *
+   *  Capped at 2000 rows server-side (it was a silent 100, which emptied whole
+   *  months of the calendar — this route is the ONLY thing the calendar is built
+   *  from). `truncated` is the server saying it cut the list; nothing in the UI can
+   *  be honest about a cut it isn't told about, so read it rather than assuming the
+   *  list is complete. */
   mine: (signal?: AbortSignal) =>
-    request<{ count: number; tasks: Task[] }>(`/tasks/${requireUserId()}`, { signal }),
+    request<TaskList>(`/tasks/${requireUserId()}`, { signal }),
 
   completed: (signal?: AbortSignal) =>
-    request<{ count: number; tasks: Task[] }>(
+    request<TaskList>(
       `/tasks/${requireUserId()}?status=completed`, { signal }),
 
   /** One status at a time.
    *
-   *  🔴 NOT a client-side filter over `mine()`. That endpoint is capped at 100 rows
-   *  ordered by created_at DESC (item_service.get_tasks), and those 100 are shared
-   *  across every status — measured on a real account: 119 completed tasks existed
-   *  while the plain list showed 73 of them, so 46 were invisible. Asking the server
-   *  for one status spends the whole budget on the rows being displayed. */
+   *  🔴 NOT a client-side filter over `mine()`. That endpoint is capped (2000 rows
+   *  now, a silent 100 when this was written) and the cap is shared across every
+   *  status — measured on a real account: 119 completed tasks existed while the
+   *  plain list showed 73, so 46 were invisible. Asking the server for one status
+   *  spends the whole budget on the rows being displayed. Still true at 2000: the
+   *  cap is a backstop, not a promise. */
   byStatus: (status: 'pending' | 'in_progress' | 'completed', signal?: AbortSignal) =>
-    request<{ count: number; tasks: Task[] }>(
+    request<TaskList>(
       `/tasks/${requireUserId()}?status=${status}`, { signal }),
 
   assignedByMe: (signal?: AbortSignal) =>
-    request<{ count: number; tasks: Task[] }>(
+    request<TaskList>(
       `/tasks/${requireUserId()}/assigned-by-me`, { signal }),
 
   create: (body: {
     title: string; description?: string; due_at?: string | null
     priority?: string; assigned_to_user_id?: number | null
     assigned_to_user_ids?: number[]; item_type?: 'task'
+    /** Due on a DAY rather than at a moment. `due_at` is still required and still
+     *  carries the date; this marks its time component as a placeholder. Without it
+     *  an anytime task becomes a hard deadline at whatever hour was sent. */
+    is_all_day?: boolean
     /** Project task (the backend's default) vs personal. `is_project=0` hides it from
      *  `GET /teams/{id}/tasks?project=true`, i.e. from My Team — which is the whole
      *  point of the distinction. */
@@ -222,8 +243,13 @@ export const tasks = {
     request<void>(`/items/${itemId}?user_id=${requireUserId()}`,
       { method: 'DELETE', nullOn404: true }),
 
+  /** 🔴 `user_id` is a REQUIRED query param on this route (Query(...), no default),
+   *  and the response is `{task_id, timeline}` — NOT a bare array. Both were wrong
+   *  here: the call was a guaranteed 422 and the type would have mis-read the body.
+   *  Latent only because nothing calls it yet. */
   timeline: (taskId: number, signal?: AbortSignal) =>
-    request<unknown[]>(`/tasks/${taskId}/timeline`, { signal }),
+    request<{ task_id: number; timeline: unknown[] }>(
+      `/tasks/${taskId}/timeline?user_id=${requireUserId()}`, { signal }),
 
   comments: (taskId: number, signal?: AbortSignal) =>
     request<{ task_id: number; comments: TaskComment[] }>(
@@ -271,9 +297,19 @@ export const meetings = {
   create: (body: {
     title: string; scheduled_at: string; ends_at?: string | null
     location?: string; assigned_to_user_id?: number | null
-    /** Notes. The backend was silently DROPPING this until it was found: the column
-     *  pa_items.description always existed, the request model just had no field for
-     *  it, and Pydantic ignores unknown keys. Measured — text in, None out. */
+    /** Notes.
+     *
+     *  🔴 STILL DROPPED ON CREATE as of branch `remove-rfq-from-oscar`. Verified in
+     *  main.py: `MeetingCreateRequest` has no `description` field and the handler
+     *  never reads one, and Pydantic silently ignores unknown keys — so text goes
+     *  in and comes back null. The column (pa_items.description) exists and the
+     *  EDIT path works (`ItemUpdateRequest` does declare it), which makes this
+     *  especially confusing: notes vanish on save, then stick if you immediately
+     *  edit the meeting and retype them.
+     *
+     *  Kept in the type on purpose — the field is correct, the backend is what
+     *  needs the one-line fix. Callers that need notes to persist on a NEW meeting
+     *  must follow the create with an update (see EditMeetingSheet). */
     description?: string
     /** Every teammate invitee. The backend fans the meeting out so each of them
      *  sees it on their own schedule; `assigned_to_user_id` is the primary and is
@@ -385,10 +421,10 @@ export const team = {
    *  `is_project`, NOT by "is it delegated" — that client-side filter is what used
    *  to drop self-assigned RFQ tasks off the Team Tasks tab. */
   projectTasks: (teamId: number, signal?: AbortSignal) =>
-    request<{ count: number; tasks: Task[] }>(`/teams/${teamId}/tasks?project=true`, { signal }),
+    request<TaskList>(`/teams/${teamId}/tasks?project=true`, { signal }),
 
   memberTasks: (teamId: number, memberId: number, signal?: AbortSignal) =>
-    request<{ count: number; tasks: Task[] }>(
+    request<TaskList>(
       `/teams/${teamId}/members/${memberId}/tasks`, { signal }),
 }
 

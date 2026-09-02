@@ -102,7 +102,7 @@ export function EditMeetingSheet({ meeting, onClose, onSaved, defaultDate }: {
       if (creating) {
         // POST /meetings, the endpoint that has existed all along with no UI behind
         // it. Times assembled from the PARTS, exactly as the edit path does.
-        await meetingsApi.create({
+        const r = await meetingsApi.create({
           title: t,
           scheduled_at: `${date}T${from}:00`,
           ...(to ? { ends_at: `${date}T${to}:00` } : {}),
@@ -111,6 +111,19 @@ export function EditMeetingSheet({ meeting, onClose, onSaved, defaultDate }: {
           ...(invitees.length ? { attendee_user_ids: invitees } : {}),
           ...(guestList().length ? { attendees: guestList() } : {}),
         })
+        // 🔴 POST /meetings DISCARDS `description` — MeetingCreateRequest has no
+        // such field and Pydantic drops unknown keys silently, so the notes above
+        // never reach the row. PATCH /items does accept it, so persist them with a
+        // follow-up write rather than losing what the user typed.
+        //
+        // Best-effort on purpose: the meeting itself is already created and is the
+        // thing that matters. Failing the whole save here would report an error for
+        // a meeting that exists, and the user would create it twice.
+        const notes = description.trim()
+        if (notes && r?.meeting?.id) {
+          try { await tasksApi.update(r.meeting.id, { description: notes }) }
+          catch { /* notes lost, meeting kept — recoverable by editing it */ }
+        }
         onSaved()
         return
       }
