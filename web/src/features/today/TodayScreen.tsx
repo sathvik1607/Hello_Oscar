@@ -4,8 +4,7 @@ import { meetings as meetingsApi, tasks as tasksApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
 import {
-  dueLabel, isToday, istNow, parseIstNaive, timeLabel,
-} from '../../lib/format'
+  dueLabel, isToday, istNow, parseIstNaive, timeLabel, isReallyOverdue } from '../../lib/format'
 import type { Meeting, Task } from '../../lib/types'
 import { completedToday, todayTimeline } from '../tasks/buckets'
 import { TaskCard } from '../tasks/TaskCard'
@@ -73,9 +72,9 @@ export function TodayScreen() {
       (parseIstNaive(b.scheduled_at)?.getTime() ?? 0)),
   [m.data])
 
-  const nextUp = timeline.find(x => !x.is_overdue) ?? timeline[0]
+  const nextUp = timeline.find(x => !isReallyOverdue(x)) ?? timeline[0]
   const nextDue = nextUp?.due_at ? parseIstNaive(nextUp.due_at) : null
-  const overdueCount = timeline.filter(x => x.is_overdue).length
+  const overdueCount = timeline.filter(x => isReallyOverdue(x)).length
 
   if (t.loading && !t.data) {
     return (

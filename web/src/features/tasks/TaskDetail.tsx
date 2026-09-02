@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Check, ChevronDown, Clock, Flag, Pencil, Trash2, Users, X } from 'lucide-react'
 import { ApiError, tasks as tasksApi } from '../../lib/api'
 import { getUser } from '../../lib/session'
-import { dueLabel, messageTime, parseIstNaive, relative, isEscalated, priorityLabel } from '../../lib/format'
+import { dueLabel, messageTime, parseIstNaive, relative, isEscalated, priorityLabel, isReallyOverdue } from '../../lib/format'
 import type { Task } from '../../lib/types'
 import { CommentComposer, CommentList, useCommentThread } from './CommentThread'
 import { NewTaskSheet } from './NewTaskSheet'
@@ -143,7 +143,7 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
               {isEscalated(task.priority) && (
                 <Badge tone={task.priority}><Flag className="size-3" /> {priorityLabel(task.priority)}</Badge>
               )}
-              {task.is_overdue && !done && <Badge tone="overdue">{relative(due)}</Badge>}
+              {isReallyOverdue(task) && !done && <Badge tone="overdue">{relative(due)}</Badge>}
             </div>
             <h2 className={cx('text-[17px] font-semibold leading-snug', done && 'line-through')}>
               {task.title}

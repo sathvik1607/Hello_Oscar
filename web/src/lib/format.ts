@@ -227,3 +227,20 @@ export const isEscalated = (p: string | null | undefined) =>
  *  that behave identically don't appear to be different things. */
 export const priorityLabel = (p: string | null | undefined) =>
   p === 'high' ? 'critical' : (p ?? '')
+
+/**
+ * Is this task genuinely late?
+ *
+ * 🔴 NOT just `task.is_overdue`. An all-day ("anytime") task carries a due_at only
+ * to name the DAY — its time component is a 23:59 placeholder, not a deadline the
+ * user chose. So the moment that date rolls past, a task somebody deliberately left
+ * untimed gets reported late against a time they never set.
+ *
+ * Fixed at the source too (main.py now ANDs `not is_all_day` into is_overdue), but
+ * kept here as well: an older backend still sends the unguarded flag, and clients
+ * cannot assume which build they are talking to. Belt and braces, and it costs one
+ * boolean.
+ */
+export const isReallyOverdue = (t: {
+  is_overdue?: boolean; is_all_day?: boolean
+}) => !!t.is_overdue && !t.is_all_day

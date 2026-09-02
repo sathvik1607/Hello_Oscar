@@ -7,8 +7,7 @@ import { useApi } from '../../lib/useApi'
 import { getUser } from '../../lib/session'
 import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
 import {
-  dayLabel, istDateKey, istNow, monthYearLabel, parseIstNaive, timeLabel,
-} from '../../lib/format'
+  dayLabel, istDateKey, istNow, monthYearLabel, parseIstNaive, timeLabel, isReallyOverdue } from '../../lib/format'
 import type { Meeting, Task } from '../../lib/types'
 import { MeetingDetail } from './MeetingDetail'
 import { TaskDetail } from '../tasks/TaskDetail'
@@ -513,7 +512,7 @@ function TaskRow({ task, at, onOpen }: {
              style={{
                background: cancelled ? '#94A3B8'
                  : done ? '#94A3B8'
-                 : task.is_overdue ? '#EF4444' : '#22C55E',
+                 : isReallyOverdue(task) ? '#EF4444' : '#22C55E',
              }} />
         <div className="min-w-0 flex-1">
           <div className={cx('text-[14.5px] font-medium leading-snug',
@@ -528,7 +527,7 @@ function TaskRow({ task, at, onOpen }: {
               : <Badge tone="neutral">Deadline</Badge>}
             {/* Overdue is irrelevant once a task is closed — the Flutter card
                 suppresses it the same way. */}
-            {task.is_overdue && !closed && <Badge tone="overdue">Overdue</Badge>}
+            {isReallyOverdue(task) && !closed && <Badge tone="overdue">Overdue</Badge>}
             {/* WHO — which this row never said. A calendar of "Take water" and "Call
                 the supplier" gives no clue whether it is yours to do or something you
                 handed out, and on a lead's calendar most of it is the latter.

@@ -2,7 +2,7 @@ import {
   AlertCircle, ArrowLeft, ArrowRight, Check, Clock, GitBranch, MessageSquare, Users,
 } from 'lucide-react'
 import type { Task } from '../../lib/types'
-import { dueLabel, parseIstNaive, relative, isEscalated, priorityLabel } from '../../lib/format'
+import { dueLabel, parseIstNaive, relative, isEscalated, priorityLabel, isReallyOverdue } from '../../lib/format'
 import { getUser } from '../../lib/session'
 import { Badge, Card, STATUS_LABEL, cx } from '../../ui'
 
@@ -119,12 +119,12 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee,
                 two time labels on one row is noise, and "3h overdue" already
                 contains everything "6:30 pm" said. */}
             <span className="flex min-w-0 items-center gap-1 text-xs"
-                  style={task.is_overdue && !terminal
+                  style={isReallyOverdue(task) && !terminal
                     ? { color: '#DC2626', fontWeight: 600 }
                     : { color: 'var(--text-subtle)' }}>
               <Clock className="size-3 shrink-0" />
               <span className="truncate tabular-nums">
-                {task.is_overdue && !terminal ? relative(due)
+                {isReallyOverdue(task) && !terminal ? relative(due)
                   : due ? dueLabel(due) : 'No time set'}
               </span>
             </span>

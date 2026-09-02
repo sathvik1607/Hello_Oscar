@@ -1,7 +1,6 @@
 import type { Task } from '../../lib/types'
 import {
-  dayLabel, isToday, isTomorrow, istDateKey, istNow, parseIstNaive,
-} from '../../lib/format'
+  dayLabel, isToday, isTomorrow, istDateKey, istNow, parseIstNaive, isReallyOverdue } from '../../lib/format'
 
 /**
  * The order tasks are shown in.
@@ -39,7 +38,7 @@ export function bucketOf(t: Task): BucketId {
   // Overdue is the server's own verdict (`is_overdue`), which accounts for the
   // status. Recomputing it here would let the client and the scheduler disagree
   // about what "overdue" means, and the scheduler is the one sending the reminder.
-  if (t.is_overdue) return 'previous'
+  if (isReallyOverdue(t)) return 'previous'
   if (due && isToday(due)) return 'upcoming'
   return 'later'
 }
@@ -52,17 +51,40 @@ export const isActive = (t: Task) =>
 
 /** Earliest first, undated last. An undated task sorted as though it were due at
  *  the epoch would sit above genuinely urgent work. */
+/**
+ * Ordering, in three tiers.
+ *
+ * 1. CRITICAL FIRST. Priority is scheduler BEHAVIOUR here, not decoration — a
+ *    critical task is the only kind that gets a reminder at all, so it is the only
+ *    kind with a real consequence for being missed. Sorting purely by time buried
+ *    it under whatever happened to be scheduled earlier.
+ *
+ * 2. ANYTIME (all-day) LAST, and kept together. Its due_at is a 23:59 placeholder
+ *    rather than a chosen time, so sorting it by that value would drop it at the
+ *    bottom of the *timed* run and imply a late-evening commitment nobody made.
+ *    Treating it as its own group says the honest thing: some time today, no
+ *    particular hour.
+ *
+ * 3. Then by time, then by id — the id tiebreak keeps an undated list from
+ *    reshuffling on every refetch, which reads as data changing when nothing has.
+ */
+const isCritical = (t: Task) => t.priority === 'critical' || t.priority === 'high'
+const isAnytime = (t: Task) => !!t.is_all_day
+
 export function byDueAsc(a: Task, b: Task): number {
+  // Critical outranks everything, including an earlier normal task.
+  if (isCritical(a) !== isCritical(b)) return isCritical(a) ? -1 : 1
+
+  // Anytime sinks below every timed task in the same priority tier.
+  if (isAnytime(a) !== isAnytime(b)) return isAnytime(a) ? 1 : -1
+  if (isAnytime(a) && isAnytime(b)) return a.id - b.id
+
   const da = parseIstNaive(a.due_at)?.getTime()
   const db = parseIstNaive(b.due_at)?.getTime()
-  if (da === undefined && db === undefined) {
-    // Stable tiebreak on id, so an undated list does not reshuffle on every
-    // refetch — visible reordering reads as data changing when nothing has.
-    return a.id - b.id
-  }
+  if (da === undefined && db === undefined) return a.id - b.id
   if (da === undefined) return 1
   if (db === undefined) return -1
-  return da - db
+  return da - db || a.id - b.id
 }
 
 export function groupTasks(tasks: Task[]): Record<BucketId, Task[]> {
@@ -82,7 +104,7 @@ export function todayTimeline(tasks: Task[]): Task[] {
     .filter(isActive)
     .filter(t => {
       const due = parseIstNaive(t.due_at)
-      return t.is_overdue || t.status === 'in_progress' || (due && isToday(due))
+      return isReallyOverdue(t) || t.status === 'in_progress' || (due && isToday(due))
     })
     .sort(byDueAsc)
 }
