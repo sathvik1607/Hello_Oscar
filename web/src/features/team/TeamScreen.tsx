@@ -389,7 +389,9 @@ export function TeamScreen() {
                           onToggle={() => setOpenTask(t)}
                           onOpen={() => { comments.markSeen(t.id); setOpenTask(t) }}
                         unreadComments={comments.byItem.get(t.id)}
-                          showAssignee />
+                          /* Both sides: this screen is about other people's work,
+                             so "who gave it" and "who has it" are the point. */
+                          bothParties />
               ))}
             </div>
           </div>

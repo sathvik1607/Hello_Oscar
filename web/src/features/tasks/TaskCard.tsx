@@ -17,22 +17,40 @@ import { Badge, Card, STATUS_LABEL, cx } from '../../ui'
  * screen. Completing a task is the most common thing anyone does here, and making
  * it a two-navigation operation is the difference between a tool and a form.
  */
-export function TaskCard({ task, onToggle, onOpen, busy, showAssignee,
+export function TaskCard({ task, onToggle, onOpen, busy, showAssignee, bothParties,
                           unreadComments }: {
   task: Task
   onToggle: () => void
   onOpen: () => void
   busy?: boolean
-  /** Accepted and ignored. The From:/To: lines are driven by OWNERSHIP now, matching
-   *  the Flutter card, so nothing gates them: a delegated task must say who has it on
-   *  every screen, not only on Team. Kept in the signature so the four call sites do
-   *  not all need editing for a prop that no longer changes anything. */
+  /**
+   * Accepted and ignored — every screen passes it and none of them means anything
+   * by it any more. Kept in the signature so the seven call sites do not all need
+   * editing for a prop that changes nothing. Use `bothParties` for the real switch.
+   */
   showAssignee?: boolean
+  /**
+   * Show BOTH sides — "From: X" and "To: Y" — instead of framing the row around the
+   * viewer.
+   *
+   * The default framing asks "do I own this?", which is the right question on Today
+   * and on Tasks: those screens are your own plate, so naming yourself on every row
+   * is a column of noise. My Team asks a different question entirely — who is on
+   * what — and there the viewer is usually neither party. Under the default logic a
+   * task Sathvik gave Sriram rendered as "From: Sathvik" with no sign of who has it,
+   * and a task the LEAD handed out rendered "To: Sriram" with no sign of who sent
+   * it. Half the answer either way, on the one screen whose entire purpose is that
+   * answer.
+   *
+   * 🔴 MY TEAM ONLY. On Today, Tasks, Oscar and Voice the viewer-centric framing is
+   * the correct one — those screens are your own plate, and printing "From: <you>"
+   * on a task you set yourself is the exact noise the ownership logic removes.
+   */
+  bothParties?: boolean
   /** Unread comments on this task. Drives the badge and the glow — see
    *  useUnreadComments for why this is derived from notifications. */
   unreadComments?: number
 }) {
-  void showAssignee                 // see the prop's own note
   const unread = unreadComments ?? 0
   const me = getUser()
   const due = parseIstNaive(task.due_at)
@@ -70,15 +88,32 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee,
    *   home screen where most rows are your own.
    */
   const iOwn = task.owner_user_id == null || task.owner_user_id === me?.id
-  const toName = iOwn && task.assigned_to_user_id && task.assigned_to_user_id !== me?.id
-    ? task.assigned_to_name : null
-  const fromName = !iOwn ? task.owner_name : null
+  /**
+   * `showAssignee` switches from the viewer's point of view to the TASK's.
+   *
+   * Both names are shown, and each is suppressed only when it is the same person as
+   * the other side — a task someone kept for themselves says "From: X" once rather
+   * than "From: X / To: X", which is the same fact printed twice.
+   */
+  void showAssignee                 // see the prop's own note
+  const bothSides = !!bothParties
+  const toName = bothSides
+    ? (task.assigned_to_user_id && task.assigned_to_user_id !== task.owner_user_id
+        ? task.assigned_to_name : null)
+    : (iOwn && task.assigned_to_user_id && task.assigned_to_user_id !== me?.id
+        ? task.assigned_to_name : null)
+  const fromName = bothSides ? task.owner_name : (!iOwn ? task.owner_name : null)
   // Nobody else is involved: I own it and it is assigned to me (or to nobody, which
   // create_item resolves to me anyway). Previously this rendered NOTHING — both
   // fromName and toName are null — so a self-assigned task had a blank space where
   // every other card names a person, and the row looked unfinished rather than
   // deliberately solo. "Personal" is the honest label and matches the mobile card.
-  const isPersonal = !fromName && !toName
+  /**
+   * Nobody else is involved. On My Team that means a member's own task — they own it
+   * and kept it — where `toName` is suppressed as a duplicate of `fromName`, so the
+   * test has to be "no second party", not "no names at all".
+   */
+  const isPersonal = bothSides ? !toName && !fromName : (!fromName && !toName)
 
   return (
     <Card className={cx('group transition', terminal && 'opacity-60')}
@@ -205,7 +240,12 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee,
           {/* ── From: / To: — their own lines, as on mobile ───────────── */}
           {/* From is ACCENT-coloured and bolder while To is muted, deliberately:
               work someone handed YOU is a claim on your time, work you handed out is
-              a thing to track. The Flutter card draws exactly this distinction. */}
+              a thing to track. The Flutter card draws exactly this distinction.
+
+              🔴 That emphasis is only honest when the row is ABOUT you. On My Team
+              (`showAssignee`) you are usually neither party, so an accented "From"
+              would shout at a bystander about somebody else's inbox. Both lines are
+              muted there and the pair reads as one fact: X gave this to Y. */}
           {isPersonal && (
             <div className="mt-1 flex items-center gap-1 text-xs"
                  style={{ color: 'var(--text-subtle)' }}>
@@ -214,11 +254,14 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee,
             </div>
           )}
           {fromName && (
-            <div className="mt-1 flex items-center gap-1 text-xs font-medium"
-                 style={{ color: 'var(--accent)' }}>
+            <div className={cx('mt-1 flex items-center gap-1 text-xs',
+                               !bothSides && 'font-medium')}
+                 style={{ color: bothSides ? 'var(--text-subtle)' : 'var(--accent)' }}>
               <ArrowLeft className="size-3 shrink-0" />
-              <span>From:</span>
-              <span className="truncate font-semibold">{fromName}</span>
+              <span className={cx(bothSides && 'font-medium')}>From:</span>
+              <span className={cx('truncate', bothSides ? 'font-medium' : 'font-semibold')}>
+                {fromName}
+              </span>
             </div>
           )}
           {toName && (
