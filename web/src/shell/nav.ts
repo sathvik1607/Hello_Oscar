@@ -37,17 +37,30 @@ export type NavItem = {
  * So Chats stays out of the bar rather than crowding it to six slots. Sidebar order
  * still matches.
  *
- * Flutter also has no separate Tasks tab for a team user — that slot IS "My Team".
- * The web sidebar has room for both, so Tasks keeps its own entry, placed after the
- * five shared ones.
+ * 🔴 MY TEAM IS IN THE BAR, TASKS IS NOT — and this is the SECOND way the web bar
+ * follows Flutter rather than diverging from it: Flutter has no separate Tasks tab
+ * for a team user either, because that slot IS "My Team". Tasks keeps its sidebar
+ * entry and its route; on a phone it lives behind More.
+ *
+ * The reasoning is what each screen answers. Today is your own work, and Tasks is
+ * the same work again with a filter and a search over it — a second copy of a
+ * screen already in the bar. My Team answers a question nothing else does (who is
+ * on what) and is now scoped to today, so it is a glance rather than a backlog.
+ * Searching for an old task is a deliberate trip; seeing the team is a check you
+ * make repeatedly.
+ *
+ * ⚠️ A PERSONAL ACCOUNT GETS THREE TABS, not four — My Team is `needsTeam`, and
+ * AppShell filters by team BEFORE picking the primaries. That is correct rather
+ * than something to pad: Tasks is one tap away in More for exactly those users,
+ * who have no team screen to want.
  */
 export const NAV: NavItem[] = [
   { id: 'today',         label: 'Today',    icon: Home,           primary: true },
-  { id: 'team',          label: 'My Team',  icon: Users, needsTeam: true },
+  { id: 'team',          label: 'My Team',  icon: Users, needsTeam: true, primary: true },
   { id: 'chat',          label: 'OscarAI',  icon: MessagesSquare, primary: true },
   { id: 'calendar',      label: 'Calendar', icon: CalendarDays,   primary: true },
   { id: 'messages',      label: 'Chats',    icon: MessageSquare, needsTeam: true },
-  { id: 'tasks',         label: 'Tasks',    icon: CheckSquare,    primary: true },
+  { id: 'tasks',         label: 'Tasks',    icon: CheckSquare },
   /* Notes is HIDDEN from NAV, like Personalize. Route, screen and TITLES all stay —
      `/notes` still works and the backend endpoints are untouched — so bringing it
      back is uncommenting one line, not rebuilding a feature. */
