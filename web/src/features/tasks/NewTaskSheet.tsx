@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { X } from 'lucide-react'
+import { Users, X } from 'lucide-react'
 import { ApiError, tasks as tasksApi, team as teamApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { getUser } from '../../lib/session'
@@ -92,7 +92,16 @@ export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedAssignees
    * PROJECT task whether you wanted it or not. `is_project=0` hides it from
    * `GET /teams/{id}/tasks?project=true`, which is My Team.
    */
-  const [isProject, setIsProject] = useState(task?.is_project !== 0 && task?.is_project !== false)
+  /**
+   * Always a project (team) task. The form no longer offers the choice — see the
+   * "Team task" row below — so this is a constant rather than state.
+   *
+   * 🔴 EDITING KEEPS THE TASK'S OWN VALUE. A personal task created before this
+   * change, or by Flutter (which still has the switch), must not be silently
+   * published to the team board just because someone fixed its title here. Only a
+   * NEW task is forced to true.
+   */
+  const isProject = task ? (task.is_project !== 0 && task.is_project !== false) : true
   const [title, setTitle] = useState(task?.title ?? '')
   const [date, setDate] = useState(seededDate ?? istDateKey(istNow()))
   const [time, setTime] = useState(seededTime ?? defaultTime())
@@ -314,29 +323,26 @@ export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedAssignees
             </div>
           </Field>
 
-          {/* Hidden once the task is delegated — the choice is irrelevant there, and
-              offering a switch that cannot change the outcome is worse than none.
-              Flutter hides it on the same condition. */}
+          {/* 🔴 EVERY TASK IS A TEAM TASK — a statement, not a switch.
+              This was a Project/Personal toggle defaulting to ON. It is now fixed
+              on, and the row just SAYS so: a control whose only sensible setting is
+              the default is a decision handed to the user for no reason, and the
+              one thing it could do was quietly hide a task from the team board.
+              A line of text cannot be left in the wrong position by accident.
+              Still hidden when delegated, as before — handing work to a teammate is
+              team work by definition, so `delegated ? true : isProject` (unchanged
+              in submit) now resolves to true either way. */}
           {!delegated && (
-            <button type="button" onClick={() => setIsProject(v => !v)}
-                    className="flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition"
-                    style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}>
+            <div className="flex w-full items-center gap-3 rounded-xl border px-3.5 py-3"
+                 style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}>
+              <Users className="size-4 shrink-0" style={{ color: 'var(--text-subtle)' }} />
               <span className="min-w-0 flex-1">
-                <span className="block text-[13.5px] font-medium">
-                  {isProject ? 'Project task' : 'Personal task'}
-                </span>
+                <span className="block text-[13.5px] font-medium">Team task</span>
                 <span className="block text-[12px]" style={{ color: 'var(--text-subtle)' }}>
-                  {isProject ? 'Shared with your team' : 'Only for you'}
+                  Shared with your team
                 </span>
               </span>
-              {/* A switch, not a checkbox: it is two named states, not an option you
-                  tick. Same reading as the mobile SwitchListTile. */}
-              <span className="relative h-[22px] w-[38px] shrink-0 rounded-full transition"
-                    style={{ background: isProject ? 'var(--accent)' : 'var(--border-strong)' }}>
-                <span className="absolute top-[3px] size-4 rounded-full bg-white transition-all"
-                      style={{ left: isProject ? '19px' : '3px' }} />
-              </span>
-            </button>
+            </div>
           )}
 
           {err && <p className="text-[13px]" style={{ color: '#DC2626' }}>{err}</p>}
