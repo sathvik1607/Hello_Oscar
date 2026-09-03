@@ -6,7 +6,7 @@ import { notifications as notifApi, team as teamApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { subscribe } from '../../lib/appSocket'
 import { getUser } from '../../lib/session'
-import { messageTime, parseUtcNaive } from '../../lib/format'
+import { messageTime, parseUtcNaive, stripDedupMarker } from '../../lib/format'
 import type { AppNotification, NotificationType } from '../../lib/types'
 import type { SectionId } from '../../shell/nav'
 import { Button, Card, EmptyState, ErrorState, Skeleton, cx } from '../../ui'
@@ -246,7 +246,7 @@ export function NotificationsScreen({ onNavigate }: {
                 <div className="min-w-0 flex-1">
                   <p className={cx('break-words text-[14px] leading-snug',
                                    !row.is_read && 'font-medium')}>
-                    {row.message}
+                    {stripDedupMarker(row.message)}
                   </p>
                   <div className="mt-1 text-[11px] tabular-nums"
                        style={{ color: 'var(--text-subtle)' }}>

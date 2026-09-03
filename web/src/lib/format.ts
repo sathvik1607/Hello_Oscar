@@ -251,3 +251,28 @@ const fmtDayMonth = new Intl.DateTimeFormat('en-IN', {
   day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata',
 })
 export const dayMonthLabel = (d: Date) => fmtDayMonth.format(d)
+
+/**
+ * Remove the scheduler's dedup marker from a notification message.
+ *
+ * The backend appends "[#3662:crit_t15:202609031200]" to the text it STORES, and
+ * finds it again with a LIKE to avoid sending the same reminder twice across a
+ * restart. So the marker has to stay in the database — it just must never be read
+ * by a person. Nothing stripped it on the way out, so every task reminder in the
+ * bell ended with a row of internal ids.
+ *
+ * Done client-side as well as server-side on purpose: this is presentation, the
+ * cost is one regex per row, and it keeps working against an older backend that
+ * still serves the raw text. Belt and braces for a string no user should ever see.
+ *
+ * Matches at the END and tolerates both the current `[#id:tier:YYYYMMDDHHMM]` and
+ * the older two-part `[#id:tier]` — rows of both shapes exist. Not a global
+ * replace: the marker is only ever appended, so a `[#…]` mid-sentence was typed by
+ * a person and is theirs to keep.
+ */
+const DEDUP_MARKER = /\s*\[#\d+:[a-z0-9_]+(?::[a-z0-9]+)?\]\s*$/i
+
+export function stripDedupMarker(s: string | null | undefined): string {
+  if (!s) return ''
+  return s.replace(DEDUP_MARKER, '').trimEnd()
+}
