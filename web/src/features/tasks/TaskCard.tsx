@@ -237,15 +237,21 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee, bothParti
             )}
           </div>
 
-          {/* ── From: / To: — their own lines, as on mobile ───────────── */}
-          {/* From is ACCENT-coloured and bolder while To is muted, deliberately:
-              work someone handed YOU is a claim on your time, work you handed out is
-              a thing to track. The Flutter card draws exactly this distinction.
+          {/* ── From: / To: ─────────────────────────────────────────── */}
+          {/* ONE LINE when both are present. "X gave this to Y" is a single fact,
+              and stacking it made the card read as two separate statements — and
+              two rows tall, on a list where the whole point is scanning many.
+              Each still gets its own line when it is alone, which is the common
+              case everywhere except My Team.
 
-              🔴 That emphasis is only honest when the row is ABOUT you. On My Team
-              (`showAssignee`) you are usually neither party, so an accented "From"
-              would shout at a bystander about somebody else's inbox. Both lines are
-              muted there and the pair reads as one fact: X gave this to Y. */}
+              From is ACCENT-coloured and bolder while To is muted, deliberately:
+              work someone handed YOU is a claim on your time, work you handed out
+              is a thing to track. The Flutter card draws exactly this distinction.
+
+              🔴 That emphasis is only honest when the row is ABOUT you. Under
+              `bothParties` (My Team) you are usually neither party, so an accented
+              "From" would shout at a bystander about somebody else's inbox —
+              muted there, and the pair reads as the one fact it is. */}
           {isPersonal && (
             <div className="mt-1 flex items-center gap-1 text-xs"
                  style={{ color: 'var(--text-subtle)' }}>
@@ -253,23 +259,32 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee, bothParti
               <span>Personal</span>
             </div>
           )}
-          {fromName && (
-            <div className={cx('mt-1 flex items-center gap-1 text-xs',
-                               !bothSides && 'font-medium')}
-                 style={{ color: bothSides ? 'var(--text-subtle)' : 'var(--accent)' }}>
-              <ArrowLeft className="size-3 shrink-0" />
-              <span className={cx(bothSides && 'font-medium')}>From:</span>
-              <span className={cx('truncate', bothSides ? 'font-medium' : 'font-semibold')}>
-                {fromName}
-              </span>
-            </div>
-          )}
-          {toName && (
-            <div className="mt-1 flex items-center gap-1 text-xs"
-                 style={{ color: 'var(--text-subtle)' }}>
-              <ArrowRight className="size-3 shrink-0" />
-              <span className="font-medium">To:</span>
-              <span className="truncate">{toName}</span>
+          {(fromName || toName) && (
+            /* min-w-0 on the row AND on each half: without it a flex child refuses
+               to shrink below its content, so `truncate` never engages and one long
+               name pushes the other off the card instead of both ellipsing. */
+            <div className="mt-1 flex min-w-0 items-center gap-x-2 gap-y-1 text-xs
+                            flex-wrap">
+              {fromName && (
+                <span className={cx('flex min-w-0 items-center gap-1',
+                                    !bothSides && 'font-medium')}
+                      style={{ color: bothSides ? 'var(--text-subtle)' : 'var(--accent)' }}>
+                  <ArrowLeft className="size-3 shrink-0" />
+                  <span className={cx('shrink-0', bothSides && 'font-medium')}>From:</span>
+                  <span className={cx('truncate',
+                                      bothSides ? 'font-medium' : 'font-semibold')}>
+                    {fromName}
+                  </span>
+                </span>
+              )}
+              {toName && (
+                <span className="flex min-w-0 items-center gap-1"
+                      style={{ color: 'var(--text-subtle)' }}>
+                  <ArrowRight className="size-3 shrink-0" />
+                  <span className="shrink-0 font-medium">To:</span>
+                  <span className="truncate">{toName}</span>
+                </span>
+              )}
             </div>
           )}
         </button>
