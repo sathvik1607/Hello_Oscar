@@ -52,6 +52,12 @@ export function useCommentThread(itemId: number, onPosted?: () => void) {
   // `accessDenied`.
   const accessDenied = !!c.error &&
     (c.error.includes('not your') || c.error.includes('access denied'))
+  // ⚠️ The backend answers "Task not found or access denied" for BOTH a permission
+  // miss and a genuinely deleted item — one string, two causes, and the client
+  // cannot tell them apart. The copy is written to survive either reading: it
+  // states who may comment rather than asserting what went wrong, so it is not a
+  // lie if the item is simply gone. Splitting them needs distinct details from the
+  // API, not more guessing here.
 
   useEffect(() => subscribe(f => {
     if (f.type !== 'task.comment.created') return
@@ -178,7 +184,23 @@ export function CommentList({ t }: { t: Thread }) {
       </div>
 
       {t.loading && t.comments.length === 0 && <Skeleton rows={2} />}
-      {t.accessDenied && <ErrorState error="You don't have access to this thread." />}
+      {/* 🔴 NOT AN ERROR — a fact about who may comment.
+          "Something went wrong / You don't have access to this thread" told the
+          reader two wrong things: that the app had failed, and that the thread is
+          somehow off-limits to them personally. Neither is true. Nothing went
+          wrong — the backend answered correctly — and the rule is simply that a
+          comment thread belongs to the people on the item.
+
+          `_task_for_user` (main.py) grants access to the owner, ANY assignee, and a
+          team lead of either's team. So the honest sentence names the rule rather
+          than the refusal, and a red warning triangle is the wrong furniture for
+          it entirely. */}
+      {t.accessDenied && (
+        <EmptyState
+          title="Only people on this task can comment"
+          body="You'll be able to read and add notes here once you're the owner or an assignee."
+        />
+      )}
       {t.error && !t.accessDenied && (
         <ErrorState error={t.error} onRetry={t.reload} />
       )}
@@ -200,6 +222,18 @@ export function CommentList({ t }: { t: Thread }) {
 /** The input. Belongs in the sheet's footer, OUTSIDE the scrolling region. */
 export function CommentComposer({ t }: { t: Thread }) {
   const fileInput = useRef<HTMLInputElement>(null)
+  /**
+   * 🔴 NO COMPOSER WITHOUT ACCESS. The message above already says only people on
+   * the task can comment, and the box sat right underneath it inviting you to type
+   * anyway — a paperclip, a placeholder and a send button, all of which would have
+   * failed on POST after you had written the note. Offering an action that cannot
+   * succeed is worse than not offering it.
+   *
+   * Decided here rather than at the two call sites (TaskDetail, MeetingDetail):
+   * the composer already receives the whole thread, so one guard covers both and a
+   * third caller cannot forget it.
+   */
+  if (t.accessDenied) return null
   return (
     <div className="border-t px-5 py-3.5"
          style={{ borderColor: 'var(--border)' }}>
