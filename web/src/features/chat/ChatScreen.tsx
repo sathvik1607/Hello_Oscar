@@ -312,6 +312,13 @@ export function ChatScreen() {
       setTurns(h.messages
         // 'system' rows exist in the table and are not conversation.
         .filter(m => m.role === 'user' || m.role === 'assistant')
+        // 🔴 A ROW WITH NO TEXT IS NOT A MESSAGE. `content` can be empty — an
+        // attachment-only turn, or a reply whose persist raced — and it rendered as
+        // a bare coloured bar: full bubble geometry, zero characters, and no way to
+        // tell whether something had failed or was still coming. Dropped rather
+        // than shown, because a bubble is a container for words and an empty one
+        // states nothing.
+        .filter(m => (m.content ?? '').trim().length > 0)
         .map(m => ({
           key: `h-${m.id}`,
           role: m.role as 'user' | 'assistant',
@@ -593,8 +600,16 @@ function Bubble({ turn, tasks, onOpen, onToggle, busyId, wide }: {
               : { background: 'var(--bg-sunken)', color: 'var(--text)' }}
         >
           {/* Whitespace preserved: Oscar's answers contain deliberate line breaks
-              and collapsing them turns a list into a run-on sentence. */}
-          <span className="whitespace-pre-wrap break-words"><Linkify text={turn.text} /></span>
+              and collapsing them turns a list into a run-on sentence.
+              Rendered only when there IS text: an empty span still forces the
+              bubble's line-height, which is what drew a blank coloured bar while a
+              turn waited for its first delta. The caret below is the honest signal
+              for "in progress" — an empty bubble is not. */}
+          {!!turn.text?.trim() && (
+            <span className="whitespace-pre-wrap break-words">
+              <Linkify text={turn.text} />
+            </span>
+          )}
 
           {/* A caret while streaming, so an in-progress reply is visibly in progress
               rather than looking finished-but-short. */}
