@@ -6,7 +6,7 @@ import { notifications as notifApi, team as teamApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { subscribe } from '../../lib/appSocket'
 import { getUser } from '../../lib/session'
-import { messageTime, parseIstNaive } from '../../lib/format'
+import { messageTime, parseUtcNaive } from '../../lib/format'
 import type { AppNotification, NotificationType } from '../../lib/types'
 import type { SectionId } from '../../shell/nav'
 import { Button, Card, EmptyState, ErrorState, Skeleton, cx } from '../../ui'
@@ -212,7 +212,27 @@ export function NotificationsScreen({ onNavigate }: {
       <div className="space-y-2">
         {rows.map(row => {
           const Icon = ICONS[row.type] ?? Bell
-          const at = parseIstNaive(row.created_at) ?? (row.created_at ? new Date(row.created_at) : null)
+          /**
+           * 🔴 NAIVE UTC, NOT IST — this row was 5h30m wrong on every notification.
+           *
+           * `pa_notifications.created_at` defaults to `datetime.now` on the SERVER
+           * (models/orm_models.py), and the server's clock is UTC, so it arrives as
+           * a bare "2026-09-03 05:47:53" with no offset. Reading it as IST moved
+           * every timestamp 5h30m into the past: a reminder that had just fired
+           * showed as "12:17 am". Verified against oscar_dev — a notification
+           * written seconds before the check read 05:47 while UTC was 05:48, and
+           * matched pa_task_comments, which is documented naive UTC.
+           *
+           * `parseUtcNaive` is the right helper for both shapes here: it assumes UTC
+           * only for a BARE string, and trusts an explicit offset. That matters
+           * because the optimistic row this screen synthesises from a live WS frame
+           * uses `new Date().toISOString()`, which carries a Z — so server rows and
+           * live rows now agree instead of differing by the offset.
+           *
+           * ⚠️ Not parseIstNaive with a swap: due_at/scheduled_at ARE IST-naive and
+           * still need that helper. The two conventions coexist by design.
+           */
+          const at = parseUtcNaive(row.created_at)
           return (
             <Card key={row.id}
                   className={cx('transition', !!row.is_read && 'opacity-60')}>
