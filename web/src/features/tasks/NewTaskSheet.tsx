@@ -197,17 +197,21 @@ export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedAssignees
               className="fade fixed inset-0 z-[70] bg-black/30" />
       <div
         role="dialog" aria-modal="true" aria-label={editing ? 'Edit task' : 'New task'}
-        className="rise fixed inset-x-0 bottom-0 z-[71] rounded-t-3xl border-t p-5
+        className="rise fixed inset-x-0 bottom-0 z-[71] rounded-t-3xl border-t p-4
                    sm:inset-0 sm:m-auto sm:h-fit sm:max-w-md sm:rounded-2xl sm:border"
         style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border)',
                  paddingBottom: 'calc(env(safe-area-inset-bottom) + 20px)' }}
       >
-        <div className="mb-5 flex items-center justify-between">
+        <div className="mb-3.5 flex items-center justify-between">
           <h2 className="text-[15px] font-semibold">{editing ? 'Edit task' : 'New task'}</h2>
           <IconButton label="Close" onClick={onClose}><X className="size-5" /></IconButton>
         </div>
 
-        <form onSubmit={submit} className="space-y-4">
+        {/* space-y-3, not 4. Eight stacked fields multiply a gap: the sheet was
+            taller than a phone viewport, so Create sat below the fold on the one
+            screen whose entire job is a single button press. Nothing shrank except
+            the air between rows. */}
+        <form onSubmit={submit} className="space-y-3">
           <Field label="Title">
             <input ref={titleRef} value={title} onChange={e => setTitle(e.target.value)}
                    className={inputCls} style={inputStyle}
@@ -223,7 +227,10 @@ export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedAssignees
               after it: what the task IS, then when and who. */}
           <Field label="Description">
             <textarea value={description} onChange={e => setDescription(e.target.value)}
-                      rows={3} placeholder="Add details (optional)"
+                      /* 2 rows, not 3. It is optional and usually a line — an
+                         empty box the height of three cost more than it gave, and
+                         it grows on focus below. */
+                      rows={2} placeholder="Add details (optional)"
                       className={cx(inputCls, 'resize-none leading-relaxed')}
                       style={inputStyle} />
           </Field>
@@ -276,7 +283,7 @@ export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedAssignees
             <div className="flex gap-1.5">
               {(['normal', 'critical'] as const).map(p => (
                 <button key={p} type="button" onClick={() => setPriority(p)}
-                        className="flex-1 rounded-lg border py-2 text-[13px] font-medium capitalize transition"
+                        className="flex-1 rounded-lg border py-1.5 text-[13px] font-medium capitalize transition"
                         style={priority === p
                           ? { background: 'var(--accent-soft)', borderColor: 'var(--accent)',
                               color: 'var(--accent)' }
@@ -293,7 +300,7 @@ export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedAssignees
               for when a title alone loses something — an address, a spec, what
               "follow up" actually meant. Same wording and shape as the Flutter
               sheet, so the two clients do not name one field two ways. */}
-          <Field label="Assign to" hint="Leave empty to keep it yourself">
+          <Field label="Assign to">
             <div className="flex flex-wrap gap-1.5">
               {(members.data ?? [])
                 .filter(mm => mm.is_active)
@@ -301,17 +308,26 @@ export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedAssignees
                   const on = assignees.includes(mm.user_id)
                   return (
                     <button key={mm.user_id} type="button"
+                            title={mm.name}
                             onClick={() => setAssignees(v => on
                               ? v.filter(x => x !== mm.user_id)
                               : [...v, mm.user_id])}
-                            className="rounded-full border px-3 py-1.5 text-[12.5px]
+                            className="rounded-full border px-2.5 py-1 text-[12.5px]
                                        transition hover:brightness-95"
                             style={on
                               ? { background: 'var(--accent)', color: '#fff',
                                   borderColor: 'var(--accent)' }
                               : { background: 'var(--bg)', borderColor: 'var(--border)',
                                   color: 'var(--text-muted)' }}>
-                      {on && '✓ '}{mm.user_id === me?.id ? 'Me' : mm.name}
+                      {/* FIRST NAME only. "Dushyanth Ammanabrolu" and "Shiva Kumar
+                          Karanam" made single chips almost as wide as the sheet, so
+                          eight members wrapped to three rows and pushed Create off
+                          screen. No ambiguity is introduced: these are picked from a
+                          list, not typed, and the id is what gets sent — this is a
+                          label, not a lookup key. Full name stays in the title
+                          attribute for the duplicate-first-name case. */}
+                      {on && '✓ '}
+                      {mm.user_id === me?.id ? 'Me' : (mm.name?.split(' ')[0] ?? mm.name)}
                     </button>
                   )
                 })}
@@ -333,7 +349,7 @@ export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedAssignees
               team work by definition, so `delegated ? true : isProject` (unchanged
               in submit) now resolves to true either way. */}
           {!delegated && (
-            <div className="flex w-full items-center gap-3 rounded-xl border px-3.5 py-3"
+            <div className="flex w-full items-center gap-2.5 rounded-xl border px-3 py-2"
                  style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}>
               <Users className="size-4 shrink-0" style={{ color: 'var(--text-subtle)' }} />
               <span className="min-w-0 flex-1">
