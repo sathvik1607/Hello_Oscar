@@ -467,15 +467,48 @@ function Thread({ open, title, subtitle, onBack, onRead }: {
    * somebody is reading back through a thread is one of the most irritating things
    * a chat UI can do. First load always jumps; after that it follows.
    */
+  /**
+   * 🔴 THE ONE-SHOT JUMP WAS BEING SPENT ON AN EMPTY THREAD.
+   *
+   * This effect runs on mount, when `rows` is still [] because the fetch has not
+   * returned. It scrolled a container with nothing in it and then set
+   * `firstPaint = false` — so by the time the real messages arrived the only test
+   * left was `nearBottom`. An empty scroller happens to report nearBottom (its
+   * scrollHeight equals its clientHeight), which is why a thread landed at the
+   * bottom sometimes and at the top other times, depending on whether the rows
+   * painted in the same frame.
+   *
+   * Two fixes:
+   *  · do nothing until there is at least one row, so the one-shot is spent on a
+   *    thread that actually has content;
+   *  · reset `firstPaint` when the conversation CHANGES. It was never reset, so
+   *    only the first thread opened in a session got its jump and every peer
+   *    picked afterwards inherited whatever scroll position was left behind.
+   *
+   * The scroll itself is deferred to the next frame: on the first paint the rows
+   * exist in React but the browser has not laid them out yet, so scrollIntoView
+   * measures a shorter container and stops short of the end.
+   */
+  // One key for "which conversation", because `open` is a discriminated union and
+  // only one of teamId/peerId exists on any given variant.
+  const convoKey = isTeam ? `t:${open.teamId}` : `d:${open.peerId}`
+  useEffect(() => { firstPaint.current = true }, [convoKey])
+
   useEffect(() => {
     const el = scroller.current
-    if (!el) return
+    if (!el || rows.length === 0) return
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 140
     if (firstPaint.current || nearBottom) {
-      endRef.current?.scrollIntoView({ block: 'end' })
+      const first = firstPaint.current
       firstPaint.current = false
+      // 'auto' on the opening jump — a smooth animation from the top of a long
+      // thread is a visible scroll-past of everything, which reads as the app
+      // hunting for the end rather than starting there.
+      requestAnimationFrame(() =>
+        endRef.current?.scrollIntoView({ block: 'end',
+                                         behavior: first ? 'auto' : 'smooth' }))
     }
-  }, [rows.length])
+  }, [rows.length, convoKey])
 
   const pick = useCallback((m: TeamMember) => {
     const ta = taRef.current

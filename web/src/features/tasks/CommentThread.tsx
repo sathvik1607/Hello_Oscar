@@ -172,8 +172,15 @@ export function CommentList({ t }: { t: Thread }) {
   const endRef = useRef<HTMLDivElement>(null)
   // Scrolls to the newest when the thread grows. Owned here because this is the
   // component that renders the node.
+  //
+  // Deferred a frame: on the first render the comments exist in React but the
+  // browser has not laid them out, so scrollIntoView measures a container that is
+  // still short and stops part-way up a long thread.
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: 'end' })
+    if (t.comments.length === 0) return
+    const id = requestAnimationFrame(() =>
+      endRef.current?.scrollIntoView({ block: 'end' }))
+    return () => cancelAnimationFrame(id)
   }, [t.comments.length])
 
   return (
