@@ -730,10 +730,24 @@ function DayDivider({ iso }: { iso: string | null | undefined }) {
     : istDateKey(d) === istDateKey(yesterday) ? 'Yesterday'
     : dayLabel(d)
   return (
-    // Sticky, so scrolling back through a long thread always tells you where you
-    // are rather than only at the moment a divider happens to be on screen.
-    <div className="sticky top-0 z-10 flex justify-center py-1">
-      <span className="rounded-full px-2.5 py-0.5 text-[11px] font-medium backdrop-blur"
+    /**
+     * 🔴 NOT STICKY. It was `sticky top-0`, and the dividers are flat SIBLINGS in
+     * one list rather than headers of per-day sections — so every one of them stuck
+     * to the same `top: 0` and they stacked on top of each other. Scrolling a
+     * multi-day thread rendered "Today" sitting on top of "Mon, 1 Sep", two pills
+     * in the same place with the text of both showing through.
+     *
+     * Real sticky day headers need each divider to be the first child of a wrapper
+     * that spans only that day's messages, so the next section's header pushes the
+     * previous one out as it scrolls. That is a restructure of the message list, not
+     * a CSS tweak — and the divider still does its job unstuck, because a thread is
+     * read in order and the date is stated where the day actually changes.
+     *
+     * `backdrop-blur` went with it: it only mattered for content passing underneath,
+     * and it was what made the pill behind readable through this one.
+     */
+    <div className="flex justify-center py-1.5">
+      <span className="rounded-full px-2.5 py-0.5 text-[11px] font-medium"
             style={{ background: 'var(--bg-elevated)', color: 'var(--text-subtle)',
                      border: '1px solid var(--border)' }}>
         {label}
