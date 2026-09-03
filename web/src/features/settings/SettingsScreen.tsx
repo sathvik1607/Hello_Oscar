@@ -87,7 +87,21 @@ export function SettingsScreen() {
         </Card>
       </section>
 
-      {/* ── voice ────────────────────────────────────────────────────── */}
+      {/* ── voice ─── COMMENTED OUT ──────────────────────────────────────
+          The whole Voice section is hidden from Settings at the owner's request.
+
+          Kept in place rather than deleted: the picker, the hotkey hints and the
+          ambient-wake switch with its billing warning are all still wired to
+          VoiceProvider, so restoring this is deleting two lines (`false &&` and
+          this comment), not rebuilding the UI. Nothing else changes — the provider,
+          the /voice routes and the hotkey itself are untouched, so voice still
+          WORKS; only its settings are unreachable from here.
+
+          🔴 The guard is `false &&`, not a {/* … *\/} JSX comment: the block below
+          contains JSX comments of its own, and the first inner `*` + `/` would
+          terminate an outer one early and spill raw markup onto the page.
+          ──────────────────────────────────────────────────────────────── */}
+      {false && (
       <section>
         <SectionHeading>Voice</SectionHeading>
         <Card className="space-y-4 p-4">
@@ -155,6 +169,7 @@ export function SettingsScreen() {
           </p>
         </Card>
       </section>
+      )}
 
       {/* ── connection ───────────────────────────────────────────────── */}
       <section>
