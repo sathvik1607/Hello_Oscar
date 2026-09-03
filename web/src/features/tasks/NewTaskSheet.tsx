@@ -205,6 +205,20 @@ export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedAssignees
                    placeholder="What needs to be done?" />
           </Field>
 
+          {/* SECOND, directly under Title. These are the two fields you TYPE; the
+              rest are pickers you tap. Description used to sit last, below the
+              Project toggle, so describing the thing you had just named meant
+              scrolling past every scheduling control — and on a phone the textarea
+              was below the fold entirely, which is why it read as optional in a way
+              the label already says better. Date/priority/assignee keep their order
+              after it: what the task IS, then when and who. */}
+          <Field label="Description">
+            <textarea value={description} onChange={e => setDescription(e.target.value)}
+                      rows={3} placeholder="Add details (optional)"
+                      className={cx(inputCls, 'resize-none leading-relaxed')}
+                      style={inputStyle} />
+          </Field>
+
           {/* 🔴 NO TIME FIELD ON A NORMAL TASK. Priority here is scheduler
               BEHAVIOUR, not a label: `critical` gets exactly one reminder at T-15
               and is the only tier that alerts at all, while `normal` gets none,
@@ -324,13 +338,6 @@ export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedAssignees
               </span>
             </button>
           )}
-
-          <Field label="Description">
-            <textarea value={description} onChange={e => setDescription(e.target.value)}
-                      rows={3} placeholder="Add details (optional)"
-                      className={cx(inputCls, 'resize-none leading-relaxed')}
-                      style={inputStyle} />
-          </Field>
 
           {err && <p className="text-[13px]" style={{ color: '#DC2626' }}>{err}</p>}
 
