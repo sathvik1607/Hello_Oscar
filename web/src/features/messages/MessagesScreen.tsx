@@ -744,7 +744,7 @@ function Bubble({ row, mine, showAuthor, read, onReply }: {
               <span className="block truncate">{row.reply_to.text}</span>
             </div>
           )}
-          <span className="whitespace-pre-wrap break-words"><Linkify text={row.text} /></span>
+          <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]"><Linkify text={row.text} /></span>
         </div>
         <div className={cx('mt-0.5 flex items-center gap-1 px-1 text-[10.5px] tabular-nums',
                            mine ? 'justify-end' : 'justify-start')}

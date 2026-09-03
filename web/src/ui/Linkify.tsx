@@ -77,8 +77,23 @@ export function Linkify({ text }: { text: string | null | undefined }) {
            e.preventDefault()
            setMenu({ href, x: e.clientX, y: e.clientY })
          }}
+         /**
+          * 🔴 INHERITS its colour — it must NOT hardcode --accent.
+          *
+          * Your own chat and comment bubbles are painted `background: var(--accent)`
+          * with `color: #fff`. A link forcing `color: var(--accent)` inside one is
+          * therefore indigo text on an indigo ground: present, selectable,
+          * clickable, and completely invisible. A URL-only comment rendered as a
+          * blank purple bar.
+          *
+          * `currentColor` is what makes this correct in BOTH places at once —
+          * white on an accent bubble, accent-coloured on the page's own
+          * background, with no per-caller prop to pass and forget. The underline
+          * is what marks it as a link, and that is now doing real work rather
+          * than decorating a colour difference.
+          */
          className="underline decoration-1 underline-offset-2 hover:opacity-80"
-         style={{ color: 'var(--accent)' }}>
+         style={{ color: 'currentColor' }}>
         {href}
       </a>,
     )

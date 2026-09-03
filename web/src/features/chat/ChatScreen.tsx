@@ -606,7 +606,7 @@ function Bubble({ turn, tasks, onOpen, onToggle, busyId, wide }: {
               turn waited for its first delta. The caret below is the honest signal
               for "in progress" — an empty bubble is not. */}
           {!!turn.text?.trim() && (
-            <span className="whitespace-pre-wrap break-words">
+            <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
               <Linkify text={turn.text} />
             </span>
           )}

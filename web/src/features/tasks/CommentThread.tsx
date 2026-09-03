@@ -338,13 +338,27 @@ function Comment({ comment, mine }: { comment: TaskComment; mine: boolean }) {
         {/* A file-only comment is legal, so the bubble renders only when there is
             text — otherwise an empty bubble sits below the chip. */}
         {comment.body.trim() && (
-          <div className={cx('mt-1.5 inline-block rounded-2xl px-3 py-2 text-left',
+          /**
+           * max-w + break-all so a long URL WRAPS instead of stretching the bubble.
+           *
+           * `inline-block` with no max-width sizes to its content, and a 130-char
+           * Google Docs link has no space to break at — so the bubble grew past the
+           * sheet and rendered as a coloured bar running off the edge, with the text
+           * beyond the viewport.
+           *
+           * `break-words` alone was not enough: it breaks at word boundaries, and a
+           * URL is one long word. `break-all` on the span is what lets it split
+           * mid-token. Prose is unaffected — it still breaks at spaces first.
+           */
+          <div className={cx('mt-1.5 inline-block max-w-full rounded-2xl px-3 py-2 text-left',
                              'text-sm leading-relaxed',
                              mine ? 'rounded-br-md' : 'rounded-bl-md')}
                style={mine
                  ? { background: 'var(--accent)', color: '#fff' }
                  : { background: 'var(--bg-sunken)', color: 'var(--text)' }}>
-            <span className="whitespace-pre-wrap break-words"><Linkify text={comment.body} /></span>
+            <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+              <Linkify text={comment.body} />
+            </span>
           </div>
         )}
       </div>
