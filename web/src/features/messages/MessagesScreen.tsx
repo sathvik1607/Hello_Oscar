@@ -6,16 +6,15 @@ import { ApiError, messages as msgApi, team as teamApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { getUser } from '../../lib/session'
 import { subscribe } from '../../lib/appSocket'
-import {
-  dayLabel, istDateKey, istNow, isToday, lastSeenLabel, messageTime, titleCaseName,
-} from '../../lib/format'
+import { lastSeenLabel, messageTime, titleCaseName } from '../../lib/format'
 import { resolvePresence, usePresence } from '../../lib/presence'
 import { usePeerTyping, useTypingSignal } from '../../lib/typing'
 import type { ChatText, TeamMember } from '../../lib/types'
 import { activeQuery, applyPick, matches, resolve } from './mentions'
 import { Avatar } from '../../shell/AppShell'
 import {
-  Button, Card, EmptyState, ErrorState, IconButton, Skeleton, cx, inputCls, inputStyle, Linkify} from '../../ui'
+  Button, Card, DayDivider, EmptyState, ErrorState, IconButton, Skeleton, cx,
+  dayKeyOf, inputCls, inputStyle, Linkify} from '../../ui'
 
 /**
  * Team group chat and 1-on-1 DMs.
@@ -705,53 +704,6 @@ function TypingBubble() {
                 }} />
         ))}
       </div>
-    </div>
-  )
-}
-
-/** The IST calendar day a message belongs to, or null if unparseable.
- *
- *  🔴 GROUPED BY IST, NOT BY THE BROWSER'S DAY. The backend's whole world is IST and
- *  every other date on screen is rendered in it, so a viewer in another timezone must
- *  see the same day boundaries as the person they are talking to — otherwise the
- *  divider disagrees with the times printed under the bubbles it separates. */
-function dayKeyOf(iso: string | null | undefined): string | null {
-  if (!iso) return null
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? null : istDateKey(d)
-}
-
-/** "Today" / "Yesterday" / "Sat, 23 Aug". */
-function DayDivider({ iso }: { iso: string | null | undefined }) {
-  const d = iso ? new Date(iso) : null
-  if (!d || Number.isNaN(d.getTime())) return null
-  const yesterday = new Date(istNow().getTime() - 86_400_000)
-  const label = isToday(d) ? 'Today'
-    : istDateKey(d) === istDateKey(yesterday) ? 'Yesterday'
-    : dayLabel(d)
-  return (
-    /**
-     * 🔴 NOT STICKY. It was `sticky top-0`, and the dividers are flat SIBLINGS in
-     * one list rather than headers of per-day sections — so every one of them stuck
-     * to the same `top: 0` and they stacked on top of each other. Scrolling a
-     * multi-day thread rendered "Today" sitting on top of "Mon, 1 Sep", two pills
-     * in the same place with the text of both showing through.
-     *
-     * Real sticky day headers need each divider to be the first child of a wrapper
-     * that spans only that day's messages, so the next section's header pushes the
-     * previous one out as it scrolls. That is a restructure of the message list, not
-     * a CSS tweak — and the divider still does its job unstuck, because a thread is
-     * read in order and the date is stated where the day actually changes.
-     *
-     * `backdrop-blur` went with it: it only mattered for content passing underneath,
-     * and it was what made the pill behind readable through this one.
-     */
-    <div className="flex justify-center py-1.5">
-      <span className="rounded-full px-2.5 py-0.5 text-[11px] font-medium"
-            style={{ background: 'var(--bg-elevated)', color: 'var(--text-subtle)',
-                     border: '1px solid var(--border)' }}>
-        {label}
-      </span>
     </div>
   )
 }

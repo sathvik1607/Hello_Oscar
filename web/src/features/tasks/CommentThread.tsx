@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { Paperclip, Send, Sparkles } from 'lucide-react'
 import { ApiError, tasks as tasksApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
@@ -9,7 +9,8 @@ import type { CommentAttachment, TaskComment } from '../../lib/types'
 import { Avatar } from '../../shell/AppShell'
 import { ACCEPTED, AttachmentChip, MAX_BYTES, PendingChip } from './AttachmentChip'
 import {
-  Button, EmptyState, ErrorState, Skeleton, cx, inputCls, inputStyle, Linkify} from '../../ui'
+  Button, DayDivider, EmptyState, ErrorState, Skeleton, cx, dayKeyOf,
+  inputCls, inputStyle, Linkify} from '../../ui'
 
 /**
  * The comment thread and its composer, for ONE item.
@@ -217,9 +218,21 @@ export function CommentList({ t }: { t: Thread }) {
       )}
 
       <div className="space-y-3.5">
-        {t.comments.map(cm => (
-          <Comment key={cm.id} comment={cm} mine={cm.user_id === t.me?.id} />
-        ))}
+        {t.comments.map((cm, i) => {
+          // A divider whenever the DAY changes, and before the first comment. Without
+          // it every row showed a bare time, so a note from last Tuesday and one from
+          // five minutes ago were indistinguishable — "6:04 pm" says nothing about
+          // which day, and a thread that goes quiet for a week reads as continuous.
+          // Same rule and same component as the DM/team threads.
+          const day = dayKeyOf(cm.created_at)
+          const prevDay = i > 0 ? dayKeyOf(t.comments[i - 1].created_at) : null
+          return (
+            <Fragment key={cm.id}>
+              {day && day !== prevDay && <DayDivider iso={cm.created_at} />}
+              <Comment comment={cm} mine={cm.user_id === t.me?.id} />
+            </Fragment>
+          )
+        })}
       </div>
       <div ref={endRef} />
     </>

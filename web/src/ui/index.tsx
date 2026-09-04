@@ -12,6 +12,7 @@ import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { AlertTriangle, Check, Loader2, WifiOff } from 'lucide-react'
+import { dayLabel, istDateKey, istNow, isToday } from '../lib/format'
 
 export const cx = (...c: (string | false | null | undefined)[]) =>
   c.filter(Boolean).join(' ')
@@ -337,6 +338,51 @@ export function TruncatedNotice({ shown }: { shown?: number }) {
          style={{ background: 'rgba(245,158,11,.10)', color: '#B45309' }}>
       Showing the most recent {shown ?? 2000}. Some older items aren’t listed —
       narrow the view to see them.
+    </div>
+  )
+}
+
+/** The IST calendar day a timestamp belongs to, or null if unparseable.
+ *
+ *  🔴 GROUPED BY IST, NOT BY THE BROWSER'S DAY. The backend's whole world is IST and
+ *  every other date on screen is rendered in it, so a viewer in another timezone must
+ *  see the same day boundaries as the person they are talking to — otherwise the
+ *  divider disagrees with the times printed beside the rows it separates. */
+export function dayKeyOf(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? null : istDateKey(d)
+}
+
+/** "Today" / "Yesterday" / "Sat, 23 Aug" — the date, stated where the day changes.
+ *
+ *  Lives here rather than in one screen because it is needed by every chronological
+ *  list in the app: DMs, team chat, and comment threads on tasks and meetings. It was
+ *  written for MessagesScreen and the comment thread went without, so a note from last
+ *  Tuesday and one from five minutes ago both read as a bare "6:04 pm". */
+export function DayDivider({ iso }: { iso: string | null | undefined }) {
+  const d = iso ? new Date(iso) : null
+  if (!d || Number.isNaN(d.getTime())) return null
+  const yesterday = new Date(istNow().getTime() - 86_400_000)
+  const label = isToday(d) ? 'Today'
+    : istDateKey(d) === istDateKey(yesterday) ? 'Yesterday'
+    : dayLabel(d)
+  return (
+    /**
+     * 🔴 NOT STICKY. These are flat SIBLINGS in one list rather than headers of
+     * per-day sections, so `sticky top-0` made every one of them stick to the same
+     * top:0 and stack — "Today" sitting on top of "Mon, 1 Sep" with both readable
+     * through each other. Real sticky day headers need each divider to be the first
+     * child of a wrapper spanning only that day's rows; that is a restructure of the
+     * list, not a CSS tweak. Unstuck it still does its job, because a thread is read
+     * in order and the date only has to be stated where the day actually changes.
+     */
+    <div className="flex justify-center py-1.5">
+      <span className="rounded-full px-2.5 py-0.5 text-[11px] font-medium"
+            style={{ background: 'var(--bg-elevated)', color: 'var(--text-subtle)',
+                     border: '1px solid var(--border)' }}>
+        {label}
+      </span>
     </div>
   )
 }
