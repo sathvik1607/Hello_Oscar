@@ -331,17 +331,16 @@ function Comment({ comment, mine }: { comment: TaskComment; mine: boolean }) {
     <div className={cx('flex gap-2.5', mine ? 'justify-end' : 'justify-start')}>
       {!mine && <Avatar name={comment.user_name ?? '?'} size={28} />}
       <div className={cx('min-w-0 max-w-[82%]', mine && 'items-end text-right')}>
-        <div className={cx('flex items-baseline gap-2', mine && 'justify-end')}>
-          {/* No name on my own messages — the side already says it. */}
-          {!mine && (
+        {/* The NAME only. The time used to sit here too, above the bubble — it now
+            rides inside it, bottom-right, so a glance at a message carries who and
+            when without the eye leaving the bubble. */}
+        {!mine && (
+          <div className="flex items-baseline gap-2">
             <span className="text-[13px] font-semibold">
               {comment.user_name ?? `User ${comment.user_id}`}
             </span>
-          )}
-          <span className="text-[11px] tabular-nums" style={{ color: 'var(--text-subtle)' }}>
-            {messageTime(comment.created_at)}
-          </span>
-        </div>
+          </div>
+        )}
 
         {/* 🔴 THE FILE COMES FIRST, and the note about it sits underneath.
             It used to be the other way round, which reads backwards: someone
@@ -370,8 +369,12 @@ function Comment({ comment, mine }: { comment: TaskComment; mine: boolean }) {
            * URL is one long word. `break-all` on the span is what lets it split
            * mid-token. Prose is unaffected — it still breaks at spaces first.
            */
-          <div className={cx('mt-1.5 inline-block max-w-full rounded-2xl px-3 py-2 text-left',
+          <div className={cx('inline-block max-w-full rounded-2xl px-3 py-2 text-left',
                              'text-sm leading-relaxed',
+                             // Only when something sits above it. My own messages no
+                             // longer have a name row, so an unconditional margin left
+                             // a stray gap at the top of every one of them.
+                             (!mine || !!comment.attachments?.length) && 'mt-1.5',
                              mine ? 'rounded-br-md' : 'rounded-bl-md')}
                style={mine
                  ? { background: 'var(--accent)', color: '#fff' }
@@ -379,6 +382,30 @@ function Comment({ comment, mine }: { comment: TaskComment; mine: boolean }) {
             <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
               <Linkify text={comment.body} />
             </span>
+            {/* The timestamp, inside the bubble and trailing the last line.
+                `float-right` rather than a flex row: floating lets a SHORT message
+                keep the time on the same line ("ok  4:49 pm") instead of forcing a
+                second row under two characters, and a long message still wraps past
+                it and pushes it to the bottom-right corner on its own.
+
+                ml-2 keeps it off the final word; `translate-y-[3px]` sits it on the
+                text baseline rather than the line top. The colour is a translucent
+                white on my own accent-filled bubble and --text-subtle on theirs —
+                one token would be invisible against one of the two grounds. */}
+            <span className="float-right ml-2 translate-y-[3px] text-[10.5px] tabular-nums select-none"
+                  style={{ color: mine ? 'rgba(255,255,255,.72)' : 'var(--text-subtle)' }}>
+              {messageTime(comment.created_at)}
+            </span>
+          </div>
+        )}
+
+        {/* A FILE-ONLY comment has no bubble to carry the time, so it gets its own
+            line — otherwise an attachment with no note is the one row in the thread
+            with no timestamp at all. */}
+        {!comment.body.trim() && !!comment.attachments?.length && (
+          <div className={cx('mt-0.5 px-1 text-[10.5px] tabular-nums', mine && 'text-right')}
+               style={{ color: 'var(--text-subtle)' }}>
+            {messageTime(comment.created_at)}
           </div>
         )}
       </div>
