@@ -1,12 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import {
   ExternalLink, FileSpreadsheet, FileText, File as FileIcon, Image as ImageIcon,
-  Loader2, Maximize2, X,
+  Loader2, X,
 } from 'lucide-react'
 import { ApiError, attachmentHref, thumbHref } from '../../lib/api'
 import { bytes } from '../../lib/format'
 import type { CommentAttachment } from '../../lib/types'
-import { Portal } from '../../ui'
 
 /**
  * A file on a comment. Mirrors the Flutter `AttachmentChip` and its entity rules,
@@ -33,19 +32,13 @@ export function AttachmentChip({ attachment: a, onRemove }: {
 }) {
   const [opening, setOpening] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  /** The lightbox href, plus the revoke that frees it. Null when closed. */
-  const [lightbox, setLightbox] = useState<{ href: string; revoke?: () => void } | null>(null)
   const preview = a.is_image || a.page_count ? thumbHref(a) : null
 
   /**
-   * 🔴 IMAGES OPEN IN PLACE, DOCUMENTS OPEN IN A TAB — and the split is not a
-   * preference, it is what each format can actually do here.
-   *
-   * An image is one `<img>`; showing it inline keeps you in the thread you were
-   * reading, and a new tab for a screenshot someone pasted is a context switch for
-   * nothing. A PDF is not renderable without a viewer — the browser's own is in the
-   * tab chrome, and embedding one (pdf.js is ~350 kB) to duplicate something every
-   * browser already ships would be the wrong trade. So a document keeps the tab.
+   * A document keeps a NEW tab — the browser's own PDF/Office viewer lives in
+   * that tab's chrome, and embedding one (pdf.js is ~350 kB) to duplicate
+   * something every browser already ships would be the wrong trade. An image
+   * navigates the SAME tab instead; see openImage below for why.
    */
   const openInTab = useCallback(async () => {
     if (opening) return
@@ -66,18 +59,34 @@ export function AttachmentChip({ attachment: a, onRemove }: {
     }
   }, [a, opening])
 
+  /**
+   * 🔴 SAME TAB, AT THE IMAGE'S OWN NATIVE SIZE — not a modal that scales it to
+   * fit the viewport. A custom lightbox was tried here and it made a tall phone
+   * screenshot readable-but-tiny (shrunk to fit the screen whole) or, zoomed,
+   * lost the surrounding chrome; the browser's own image view already does this
+   * correctly for free — it renders the file at 1:1, and a tall image simply
+   * scrolls, exactly like opening the image URL directly. So this reuses THAT
+   * instead of reimplementing it.
+   */
   const openImage = useCallback(async () => {
     if (opening) return
     setOpening(true); setErr(null)
+    let revoke: (() => void) | undefined
     try {
       // The FULL file, not the thumbnail. `thumbHref` is a 256px render — fine in the
       // chip, unreadable blown up to the viewport.
       const r = await attachmentHref(a)
-      setLightbox(r)
+      revoke = r.revoke
+      // Same tab (no '_blank'): this is meant to read as "look at the image", not
+      // "leave the app in a new tab" — the back button returns to the thread.
+      window.location.assign(r.href)
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'Could not open that image.')
     } finally {
       setOpening(false)
+      // Revoking on a delay, same reasoning as openInTab: the navigation has not
+      // necessarily finished reading the blob the instant assign() returns.
+      if (revoke) setTimeout(revoke, 60_000)
     }
   }, [a, opening])
 
@@ -139,13 +148,12 @@ export function AttachmentChip({ attachment: a, onRemove }: {
                 {opening ? 'Opening…' : subtitle}
               </span>
             </span>
-            {/* Says where the tap goes BEFORE you take it. A new tab that arrives
-                unannounced reads as the app having navigated away from you. */}
+            {/* Says where the tap goes BEFORE you take it — both kinds navigate
+                away now (same tab for an image, a new one for a document). */}
             {preview && (
               <span className="shrink-0" style={{ color: 'var(--text-subtle)' }}>
                 {opening ? <Loader2 className="size-4 animate-spin" />
-                         : a.is_image ? <Maximize2 className="size-3.5" />
-                                      : <ExternalLink className="size-3.5" />}
+                         : <ExternalLink className="size-3.5" />}
               </span>
             )}
           </button>
@@ -159,58 +167,7 @@ export function AttachmentChip({ attachment: a, onRemove }: {
         </div>
       </div>
       {err && <p className="mt-1 px-1 text-[11px]" style={{ color: '#DC2626' }}>{err}</p>}
-
-      {lightbox && (
-        <Lightbox href={lightbox.href} name={a.file_name}
-                  onClose={() => {
-                    // Revoked on close, not on a timer: the <img> has already decoded
-                    // and nothing else holds the blob, so keeping it alive would pin
-                    // a full-size image in memory for as long as the tab lives.
-                    lightbox.revoke?.()
-                    setLightbox(null)
-                  }} />
-      )}
     </div>
-  )
-}
-
-/** One image, filling the window. Deliberately not a gallery — a comment carries a
- *  handful of files, not an album, and next/previous would need a shared list this
- *  component has no view of. */
-function Lightbox({ href, name, onClose }: {
-  href: string; name: string | null; onClose: () => void
-}) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
-  return (
-    <Portal>
-      {/* The backdrop is the close button, which is how every image viewer behaves —
-          and the × stays for anyone who does not know that. */}
-      <div className="fade fixed inset-0 z-[90] grid place-items-center bg-black/80 p-4"
-           role="dialog" aria-modal="true" aria-label={name ?? 'Image'}
-           onClick={onClose}>
-        <img src={href} alt={name ?? ''}
-             // Stops a click ON the image from closing it — you click an image to
-             // look at it, not to dismiss it.
-             onClick={e => e.stopPropagation()}
-             className="max-h-full max-w-full rounded-lg object-contain shadow-2xl" />
-        <button onClick={onClose} aria-label="Close"
-                className="absolute right-4 top-4 grid size-9 place-items-center
-                           rounded-full bg-white/10 text-white hover:bg-white/20">
-          <X className="size-5" />
-        </button>
-        {name && (
-          <p className="absolute bottom-4 left-1/2 max-w-[80vw] -translate-x-1/2 truncate
-                        rounded-full bg-black/50 px-3 py-1 text-[12px] text-white">
-            {name}
-          </p>
-        )}
-      </div>
-    </Portal>
   )
 }
 
