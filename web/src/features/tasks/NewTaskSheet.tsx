@@ -24,7 +24,7 @@ import type { Task } from '../../lib/types'
  * timezone, so sending an ISO string with a Z would land the task hours off — and
  * a due time in the past is born overdue, which fires a reminder immediately.
  */
-export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedAssignees }: {
+export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedTime, seedAssignees }: {
   onClose: () => void
   onCreated: () => void
   /** Present = edit that task. Absent = create a new one. */
@@ -39,6 +39,12 @@ export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedAssignees
    *  from there lands on the day the user was looking at rather than silently on
    *  whatever today happens to be. Ignored when editing, which carries its own. */
   seedDate?: string | null
+  /** "HH:MM" (IST) to open the time field on, and to force priority to `critical` —
+   *  a normal task has no time field at all, so a seeded time with no matching
+   *  priority would be silently invisible. Only meaningful together with `seedDate`;
+   *  passed by Today when the user has actually touched its own time box, not on
+   *  its unset default (see TodayScreen). Ignored when editing. */
+  seedTime?: string | null
 }) {
   const editing = Boolean(task)
   // Seeded from the task when editing. `due_at` arrives IST-naive
@@ -46,7 +52,7 @@ export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedAssignees
   // parsed into a Date — new Date(...) would apply the browser's offset and shift
   // the time the user sees by hours.
   const seededDate = task?.due_at ? task.due_at.slice(0, 10) : (seedDate ?? null)
-  const seededTime = task?.due_at ? task.due_at.slice(11, 16) : null
+  const seededTime = task?.due_at ? task.due_at.slice(11, 16) : (seedTime ?? null)
   const me = getUser()
   /**
    * Who the task is FOR. The form had no such field, so every task created from
@@ -109,8 +115,13 @@ export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedAssignees
   // (services/priority.py aliases high→critical, medium/low→normal), which is what
   // lets an old build keep working — but a current build should send the honest
   // names, and an existing task may still carry a legacy one, so normalise on read.
-  const [priority, setPriority] = useState<'normal' | 'critical'>(
-    task?.priority === 'critical' || task?.priority === 'high' ? 'critical' : 'normal')
+  const [priority, setPriority] = useState<'normal' | 'critical'>(() => {
+    if (task) return task.priority === 'critical' || task.priority === 'high' ? 'critical' : 'normal'
+    // A seeded time has nowhere to show on a `normal` task (no time field at all),
+    // so a time the user actually picked on Today must switch the form to the one
+    // tier that keeps it.
+    return seedTime ? 'critical' : 'normal'
+  })
   // An "anytime" task: due on a DAY, at no particular time. This is the real
   // representation — a null due_at is NOT (POST /items rejects it, and a dateless
   // task falls out of every date-grouped view including Today).
@@ -377,8 +388,10 @@ export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedAssignees
 }
 
 /** The next round half-hour, in IST. A default of "now" produces a task that is
- *  overdue the moment it is created and fires a reminder immediately. */
-function defaultTime(): string {
+ *  overdue the moment it is created and fires a reminder immediately. Exported so
+ *  Today's time box (TodayScreen) can default to the same safe value instead of
+ *  duplicating the IST rounding. */
+export function defaultTime(): string {
   const parts = new Intl.DateTimeFormat('en-GB', {
     hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata',
   }).format(new Date())

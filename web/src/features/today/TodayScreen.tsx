@@ -11,7 +11,7 @@ import { TaskCard } from '../tasks/TaskCard'
 import { useTaskActions } from '../tasks/useTaskActions'
 import { TaskDetail } from '../tasks/TaskDetail'
 import { useUnreadComments } from '../tasks/useUnreadComments'
-import { NewTaskSheet } from '../tasks/NewTaskSheet'
+import { NewTaskSheet, defaultTime } from '../tasks/NewTaskSheet'
 import { MeetingDetail } from '../calendar/MeetingDetail'
 import {
   Button, Card, EmptyState, ErrorState, SectionHeading, Skeleton, cx,
@@ -67,6 +67,14 @@ export function TodayScreen() {
    *  Thursday that files new work under today would be quietly wrong. */
   const [day, setDay] = useState<string>(() => istDateKey(istNow()))
   const isTodayPicked = day === istDateKey(istNow())
+  /** The time box beside the day picker. Starts on the same safe "next half-hour"
+   *  default the task form itself uses (never literal now — a task due THIS
+   *  instant is born overdue) but is only actually PASSED to the form once the
+   *  user has touched it: an untouched default is not a choice, and a task created
+   *  from an untouched box should get the form's own normal default, not silently
+   *  inherit a time nobody picked. */
+  const [time, setTime] = useState<string>(defaultTime)
+  const [timePicked, setTimePicked] = useState(false)
 
   const allTasks = useMemo(() => t.data?.tasks ?? [], [t.data])
   const timeline = useMemo(() => todayTimeline(allTasks, day), [allTasks, day])
@@ -220,7 +228,7 @@ export function TodayScreen() {
               including next month, needs no horizontal scrolling on a phone, and
               inherits the platform's own calendar. "Today" beside it is the way
               back — a picker you can leave but not return from is a trap. */}
-          <div className="mt-4 flex items-center gap-2">
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             <input type="date" value={day} onChange={e => setDay(e.target.value || day)}
                    aria-label="Show a different day"
                    className="rounded-lg border px-2.5 py-1.5 text-[13px]"
@@ -231,6 +239,26 @@ export function TodayScreen() {
                       className="rounded-lg px-2.5 py-1.5 text-[12.5px] font-semibold"
                       style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
                 Today
+              </button>
+            )}
+            {/* ── TIME BOX ──────────────────────────────────────────────
+                Shown preselected at the next round half-hour (never literal "now" —
+                see defaultTime), only nudgeable up to an hour ahead. It does nothing
+                on its own; it exists so "New task" a moment later can open already
+                pointed at the moment you were just looking at, instead of asking you
+                to re-enter a time you basically just told this screen. */}
+            <input type="time" value={time}
+                   min={defaultTime()} max={addMinutes(defaultTime(), 60)}
+                   onChange={e => { setTime(e.target.value || time); setTimePicked(true) }}
+                   aria-label="Preselect a time for a new task"
+                   className="rounded-lg border px-2.5 py-1.5 text-[13px]"
+                   style={{ background: 'var(--bg)', borderColor: 'var(--border)',
+                            color: 'var(--text)' }} />
+            {timePicked && (
+              <button type="button" onClick={() => { setTime(defaultTime()); setTimePicked(false) }}
+                      className="rounded-lg px-2.5 py-1.5 text-[12.5px] font-semibold"
+                      style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+                Clear time
               </button>
             )}
           </div>
@@ -381,7 +409,8 @@ export function TodayScreen() {
 
       {creating && (
 
-        <NewTaskSheet seedDate={day} onClose={() => setCreating(false)}
+        <NewTaskSheet seedDate={day} seedTime={timePicked ? time : null}
+                      onClose={() => setCreating(false)}
 
                       onCreated={() => { setCreating(false); t.reload() }} />
 
@@ -401,6 +430,14 @@ export function TodayScreen() {
       )}
     </div>
   )
+}
+
+/** "HH:MM" + minutes, wrapping past midnight. Used only to cap the Today time
+ *  box an hour ahead of its default — plain string arithmetic, no Date needed. */
+function addMinutes(hhmm: string, minutes: number): string {
+  const [h, m] = hhmm.split(':').map(Number)
+  const total = (h * 60 + m + minutes + 1440) % 1440
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
 }
 
 /**
