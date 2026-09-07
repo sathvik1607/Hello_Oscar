@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { CalendarClock, Flame, CheckCircle2, Clock, Plus } from 'lucide-react'
+import { CalendarClock, Flame, CheckCircle2, Clock, Pencil, Plus } from 'lucide-react'
 import { meetings as meetingsApi, tasks as tasksApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
@@ -8,6 +8,7 @@ import {
 import type { Meeting, Task } from '../../lib/types'
 import { todayTimeline } from '../tasks/buckets'
 import { TaskCard } from '../tasks/TaskCard'
+import { TimelineEditor } from '../tasks/TimelineEditor'
 import { useTaskActions } from '../tasks/useTaskActions'
 import { TaskDetail } from '../tasks/TaskDetail'
 import { useUnreadComments } from '../tasks/useUnreadComments'
@@ -44,6 +45,11 @@ export function TodayScreen() {
      slower and less certain way to add a line to a list you are already looking at.
      Voice is still one keystroke away (Shift Shift, from anywhere). */
   const [creating, setCreating] = useState(false)
+  /** The day-view time axis, mirroring mobile's "Edit mode · Hold and drag a
+   *  task to change its time". Off by default — the plain list is the faster
+   *  read for the common case of just checking what's on; the grid trades that
+   *  compactness for a layout a drag can actually target. */
+  const [editMode, setEditMode] = useState(false)
 
   const t = useApi(s => tasksApi.mine(s), [], 'tasks:mine')
   const m = useApi(s => meetingsApi.all(s), [], 'meetings:all')
@@ -344,9 +350,28 @@ export function TodayScreen() {
         {/* Names the day when it is NOT today. A screen titled "Your day" while
             showing next Tuesday is the kind of quiet wrongness that gets acted on —
             somebody ticks off work that was never due yet. */}
-        <SectionHeading>
+        <SectionHeading
+          action={shownTimed.length > 0 && (
+            <button type="button" onClick={() => setEditMode(v => !v)}
+                    className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1
+                               text-xs font-medium transition"
+                    style={editMode
+                      ? { background: 'var(--accent)', color: '#fff' }
+                      : { background: 'var(--bg-sunken)', color: 'var(--text-muted)' }}>
+              <Pencil className="size-3.5" /> {editMode ? 'Done' : 'Edit mode'}
+            </button>
+          )}>
           {isTodayPicked ? 'Your day' : dayLabel(parseIstNaive(`${day}T12:00:00`)!)}
         </SectionHeading>
+        {/* Mirrors mobile's own banner ("Edit mode · Hold and drag a task to
+            change its time") — edit mode is a different INTERACTION, not just a
+            different layout, and a mode that changes what a tap/drag does needs
+            to say so, or a drag reads as an accidental move. */}
+        {editMode && (
+          <p className="-mt-2 mb-3 text-[12.5px]" style={{ color: 'var(--text-subtle)' }}>
+            Edit mode · Drag a task to change its time
+          </p>
+        )}
         {timeline.length === 0 ? (
           <Card>
             <EmptyState
@@ -369,21 +394,29 @@ export function TodayScreen() {
           </Card>
         ) : (
           <>
-            <div className="space-y-2">
-              {shownTimed.map(task => (
-                <TaskCard
-                  key={task.id} task={task}
-                  busy={busyId === task.id}
-                  onToggle={() => void toggle(task)}
-                  onOpen={() => { comments.markSeen(task.id); setOpenTask(task) }}
-                  unreadComments={comments.byItem.get(task.id)}
-                  showAssignee
-                />
-              ))}
-            </div>
+            {editMode ? (
+              <TimelineEditor tasks={shownTimed} anytimeTasks={shownAnytime}
+                              day={day} onChanged={t.reload} />
+            ) : (
+              <div className="space-y-2">
+                {shownTimed.map(task => (
+                  <TaskCard
+                    key={task.id} task={task}
+                    busy={busyId === task.id}
+                    onToggle={() => void toggle(task)}
+                    onOpen={() => { comments.markSeen(task.id); setOpenTask(task) }}
+                    unreadComments={comments.byItem.get(task.id)}
+                    showAssignee
+                  />
+                ))}
+              </div>
+            )}
 
-            {/* ── ANYTIME: no particular hour, so its own group under the clock ── */}
-            {shownAnytime.length > 0 && (
+            {/* ── ANYTIME: no particular hour, so its own group under the clock ──
+                Hidden in edit mode — TimelineEditor renders these itself, as its
+                own draggable bar. Showing both would list every anytime task
+                twice. */}
+            {!editMode && shownAnytime.length > 0 && (
               <div className={shownTimed.length > 0 ? 'mt-5' : undefined}>
                 <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider"
                      style={{ color: 'var(--text-subtle)' }}>
