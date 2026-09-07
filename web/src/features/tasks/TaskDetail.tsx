@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Check, ChevronDown, Clock, Pencil, Trash2, Users, X } from 'lucide-react'
+import {
+  Calendar, Check, ChevronDown, Clock, Pencil, Trash2, User, UserCheck, Users, X,
+} from 'lucide-react'
 import { ApiError, tasks as tasksApi } from '../../lib/api'
 import { getUser } from '../../lib/session'
 import { dueLabel, messageTime, parseIstNaive, relative, isReallyOverdue } from '../../lib/format'
@@ -57,7 +59,11 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
   const [err, setErr] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [editing, setEditing] = useState(false)
-  const [showDetails, setShowDetails] = useState(false)
+  // Open by default — matching mobile, where these are shown expanded. They
+  // used to be secondary metadata (created/completed timestamps) worth
+  // tucking away; now they carry who the task is FOR, which is core
+  // information on first look, not something to collapse behind a tap.
+  const [showDetails, setShowDetails] = useState(true)
   const [busyAction, setBusyAction] = useState(false)
 
   // One hook, two placements: the list scrolls with the sheet body, the composer
@@ -121,14 +127,26 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
    * made it, whether it has children. If none of that is known the block hides
    * entirely rather than rendering a table of dashes.
    */
+  /** Mirrors the Flutter `TaskDetailScreen`'s own four fields exactly —
+   *  Assigned by / Assigned to / Due / Assigned on — rather than the
+   *  Created/Completed/Created-by/Sub-tasks set this used before. "Assigned
+   *  by" and "Created by" are the SAME fact (`owner_name`), and "Assigned on"
+   *  is the same fact as the old "Created" (`created_at`) — mobile just names
+   *  both from the assignment's point of view, which is the more common
+   *  reading for a task somebody handed you. Shown for every task, self-
+   *  assigned included ("Assigned to: You"), matching mobile rather than the
+   *  old suppress-when-you rule. Icons match mobile's own per-row glyphs. */
   const details = useMemo(() => ([
-    ...(task.created_at ? [['Created', messageTime(task.created_at)]] : []),
-    ...(task.completed_at ? [['Completed', messageTime(task.completed_at)]] : []),
-    // Only worth saying when it was somebody else — "created by you" on your own
-    // task is a fact you supplied.
-    ...(task.owner_name && !task.is_mine ? [['Created by', task.owner_name]] : []),
-    ...(task.subtask_count ? [['Sub-tasks', String(task.subtask_count)]] : []),
-  ] as [string, string][]), [task])
+    { label: 'Assigned by', value: task.owner_name ?? (task.is_mine ? 'You' : '—'), icon: User },
+    { label: 'Assigned to', value: task.assigned_to_name ?? (task.is_mine ? 'You' : '—'), icon: UserCheck },
+    { label: 'Due', value: due ? dueLabel(due) : 'No time set', icon: Calendar },
+    ...(task.created_at
+      ? [{ label: 'Assigned on', value: messageTime(task.created_at), icon: Clock }] : []),
+    ...(task.completed_at
+      ? [{ label: 'Completed', value: messageTime(task.completed_at), icon: Check }] : []),
+    ...(task.subtask_count
+      ? [{ label: 'Sub-tasks', value: String(task.subtask_count), icon: Users }] : []),
+  ]), [task, due])
 
   return (
     <Frame inline={inline} label={task.title} onClose={onClose}>
@@ -138,11 +156,13 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
           <div className="min-w-0 flex-1">
             <div className="mb-2 flex flex-wrap items-center gap-1.5">
               <Badge tone={task.status}>{STATUS_LABEL[task.status] ?? task.status}</Badge>
-              {/* 🔴 NO PRIORITY BADGE, here or on the card. A critical task always
-                  carries a real due time (the API rejects one without a due_at) and
-                  the only consequence worth surfacing is being LATE — which the
-                  overdue badge beside this already says. The chip added a third
-                  restatement of the same fact. */}
+              {/* Mirrors mobile's own header, which shows the tier as a badge
+                  right beside status — normal is the quiet default there too
+                  and stays unbadged; only critical (and the legacy `high`
+                  alias) earns the chip. */}
+              {(task.priority === 'critical' || task.priority === 'high') && (
+                <Badge tone="critical">Critical</Badge>
+              )}
               {isReallyOverdue(task) && !done && <Badge tone="overdue">{relative(due)}</Badge>}
             </div>
             <h2 className={cx('text-[17px] font-semibold leading-snug', done && 'line-through')}>
@@ -179,7 +199,7 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
             </>
           )}
 
-          {/* ── details, collapsed ──────────────────────────────────── */}
+          {/* ── details, open by default ────────────────────────────── */}
           {details.length > 0 && (
             <>
               <button onClick={() => setShowDetails(v => !v)}
@@ -195,12 +215,13 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
                                            showDetails && 'rotate-180')} />
               </button>
               {showDetails && (
-                <dl className="fade mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
-                  {details.map(([k, v]) => (
-                    <div key={k} className="contents">
-                      <dt className="text-[12px]" style={{ color: 'var(--text-subtle)' }}>{k}</dt>
+                <dl className="fade mt-2 grid grid-cols-[auto_auto_1fr] items-center gap-x-2 gap-y-1.5">
+                  {details.map(({ label, value, icon: Icon }) => (
+                    <div key={label} className="contents">
+                      <Icon className="size-3.5" style={{ color: 'var(--text-subtle)' }} />
+                      <dt className="text-[12px]" style={{ color: 'var(--text-subtle)' }}>{label}</dt>
                       {/* No `capitalize` anywhere near a formatted value. */}
-                      <dd className="text-[12px]">{v}</dd>
+                      <dd className="text-[12px]">{value}</dd>
                     </div>
                   ))}
                 </dl>
