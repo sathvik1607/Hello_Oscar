@@ -67,12 +67,13 @@ export function TodayScreen() {
    *  Thursday that files new work under today would be quietly wrong. */
   const [day, setDay] = useState<string>(() => istDateKey(istNow()))
   const isTodayPicked = day === istDateKey(istNow())
-  /** The time box beside the day picker. Starts on the EXACT current time — this
-   *  is a "preselect what I'm looking at right now" control, not the task form's
-   *  own due-time field, so it carries none of that field's overdue-safety
-   *  rounding. It is only actually PASSED to the form once the user has touched
-   *  it: an untouched default is not a choice, and a task created from an
-   *  untouched box should get the form's own normal default, not silently
+  /** The time box beside the day picker. Starts on the current time rounded to
+   *  the nearest half-hour (see currentTime()) — this is a "preselect roughly
+   *  what I'm looking at right now" control, not the task form's own due-time
+   *  field, so it carries none of that field's overdue-safety rounding (which
+   *  always rounds UP). It is only actually PASSED to the form once the user has
+   *  touched it: an untouched default is not a choice, and a task created from
+   *  an untouched box should get the form's own normal default, not silently
    *  inherit a time nobody picked. */
   const [time, setTime] = useState<string>(currentTime)
   const [timePicked, setTimePicked] = useState(false)
@@ -243,13 +244,17 @@ export function TodayScreen() {
               </button>
             )}
             {/* ── TIME BOX ──────────────────────────────────────────────
-                Shown preselected at the EXACT current time, nudgeable up to 30
-                minutes ahead — a short, literal "now to soon" window rather than
-                the task form's own rounded default. It does nothing on its own;
-                it exists so "New task" a moment later can open already pointed at
-                the moment you were just looking at, instead of asking you to
-                re-enter a time you basically just told this screen. */}
-            <input type="time" value={time}
+                Shown preselected at the current time rounded to the nearest
+                half-hour, nudgeable up to 30 minutes ahead — a short "now, or a
+                little from now" window. `step={1800}` (30 min, in seconds) is
+                what makes the BROWSER'S OWN picker only ever scroll in :00/:30
+                marks instead of every minute — see currentTime() for why the
+                default has to round to that same grid rather than showing the
+                exact minute. It does nothing on its own; it exists so "New task"
+                a moment later can open already pointed at the moment you were
+                just looking at, instead of asking you to re-enter a time you
+                basically just told this screen. */}
+            <input type="time" step={1800} value={time}
                    min={currentTime()} max={addMinutes(currentTime(), 30)}
                    onChange={e => { setTime(e.target.value || time); setTimePicked(true) }}
                    aria-label="Preselect a time for a new task"
@@ -443,15 +448,22 @@ function addMinutes(hhmm: string, minutes: number): string {
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
 }
 
-/** The EXACT current time, IST, unrounded — deliberately not `defaultTime()`
- *  from NewTaskSheet, which rounds up to the next half-hour to keep a freshly
- *  created task from being born overdue. This box is not writing a due_at by
- *  itself; it is a short "now, or a little from now" window for what the NEXT
- *  task should be preselected to. */
+/** The current time, IST, rounded to the NEAREST half-hour mark (never up or
+ *  down on principle — 10:49 → 11:00, 10:15 → 10:30, 10:14 → 10:00). The time
+ *  &lt;input&gt; below is stepped to 30 minutes, and a browser's native time picker
+ *  only offers values landing exactly on the step — an unstepped value like the
+ *  literal current minute would be off the grid it itself shows, so the default
+ *  has to live on that same grid. Deliberately not `defaultTime()` from
+ *  NewTaskSheet, which always rounds UP to keep a freshly created task from
+ *  being born overdue — that concern belongs to due_at, not to this preselect. */
 function currentTime(): string {
-  return new Intl.DateTimeFormat('en-GB', {
+  const [h, m] = new Intl.DateTimeFormat('en-GB', {
     hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata',
-  }).format(new Date())
+  }).format(new Date()).split(':').map(Number)
+  const roundedMinutes = Math.round(m / 30) * 30
+  const bumpedHour = roundedMinutes === 60
+  return `${String((h + (bumpedHour ? 1 : 0)) % 24).padStart(2, '0')}:${
+    String(bumpedHour ? 0 : roundedMinutes).padStart(2, '0')}`
 }
 
 /**
