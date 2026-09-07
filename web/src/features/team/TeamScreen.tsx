@@ -5,7 +5,7 @@ import { useApi } from '../../lib/useApi'
 import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
 import { getUser, identityIsStale, signOutStaleIdentity } from '../../lib/session'
 import {
-  isToday, istDateKey, istNow, messageTime, parseIstNaive,
+  istDateKey, istNow, messageTime, parseIstNaive,
 } from '../../lib/format'
 import { resolvePresence, usePresence } from '../../lib/presence'
 import type { Task } from '../../lib/types'
@@ -52,6 +52,12 @@ export function TeamScreen() {
    * the roster still narrows to that person, which is what the roster is for.
    */
   const [selected, setSelected] = useState<number | null>(null)
+  /** Which day the task list below is scoped to — "YYYY-MM-DD" IST, same shape
+   *  and default as Today's own day picker. Defaults to today, same as before
+   *  this existed; picking another day narrows the SAME list (workspace or a
+   *  selected member) to that day instead. */
+  const [day, setDay] = useState<string>(() => istDateKey(istNow()))
+  const isTodayPicked = day === istDateKey(istNow())
   const [openTask, setOpenTask] = useState<Task | null>(null)
   const [creating, setCreating] = useState(false)
   // Unread comments per task — the badge and the glow on each card, and the
@@ -151,28 +157,33 @@ export function TeamScreen() {
       raw = raw.filter(t => t.owner_user_id === me?.id || t.is_mine)
     }
     /**
-     * 🔴 THIS SCREEN IS TODAY ONLY — the workspace and a picked member alike.
+     * 🔴 THIS SCREEN IS ONE DAY AT A TIME — the workspace and a picked member
+     * alike. My Team answers "who is on what", and that used to mean "right
+     * now" unconditionally: the workspace view was a planning view instead, 216
+     * tasks across weeks with today's four rows sitting below two months of
+     * slipped work. A day picker (below) now lets that ONE day move — but it is
+     * still exactly one day, never a range, for the same reason: Tasks and the
+     * calendar already exist for the long view, and this one stays a snapshot.
      *
-     * My Team answers "who is on what", and that is a question about right now.
-     * The workspace view was a planning view instead: 216 tasks across weeks,
-     * with today's four rows sitting below two months of slipped work and above
-     * everything still ahead. Nobody scrolls that to find out what the team is
-     * doing today, and Tasks and the calendar already exist for the long view.
-     *
-     * Today by the IST calendar day (istDateKey, the same basis as the grouping
-     * below), so a task at 23:30 stays on its own date rather than being pushed
-     * over by the browser's offset. Undated tasks fall out here as well — the
-     * grouping was already dropping them, and a task with no date is not "today".
+     * Scoped by the IST calendar day (istDateKey, the same basis as the
+     * grouping below), so a task at 23:30 stays on its own date rather than
+     * being pushed over by the browser's offset. Undated tasks fall out here as
+     * well — the grouping was already dropping them, and a task with no date
+     * cannot belong to whichever day is picked.
      */
-    const scoped = raw.filter(t => isToday(parseIstNaive(t.due_at)))
+    const scoped = raw.filter(t => {
+      const at = parseIstNaive(t.due_at)
+      return !!at && istDateKey(at) === day
+    })
     const closed = (t: Task) => t.status === 'completed' || t.status === 'cancelled'
     return [...scoped].sort((a, b) =>
       Number(closed(a)) - Number(closed(b)) || byDueAsc(a, b))
-  }, [selected, memberTasks.data, projects.data, isTeamLead, me?.id])
+  }, [selected, memberTasks.data, projects.data, isTeamLead, me?.id, day])
   const activeShown = shown.filter(t => t.status !== 'cancelled')
 
   /**
-   * Two headings: Today, then Done today.
+   * Two headings: open, then done — named "Today"/"Done today" while today is
+   * the day picked, and just "Open"/"Done" for any other day (see `groups`).
    *
    * The list is a single day (see `shown`), so the only split left worth drawing is
    * open versus finished. This was four dated headings — Overdue, Today/Tomorrow, a
@@ -182,7 +193,7 @@ export function TeamScreen() {
    * 🔴 Undated tasks are not here, and never were. A heading with no day in it is
    * not a group, it is a pile — nothing about an undated row says when it matters.
    * They are untouched and still visible on Tasks and in the member's own list;
-   * they are simply not part of a view about today.
+   * they are simply not part of a view about one day.
    */
   const groups = useMemo(() => {
     const isClosed = (t: Task) => t.status === 'completed' || t.status === 'cancelled'
@@ -205,10 +216,13 @@ export function TeamScreen() {
     const done: Task[] = []
     for (const t of activeShown) (isClosed(t) ? done : open).push(t)
     const out: { key: string; label: string; tasks: Task[] }[] = []
-    if (open.length) out.push({ key: 'today', label: 'Today', tasks: open })
-    if (done.length) out.push({ key: 'done-today', label: 'Done today', tasks: done })
+    // "Today"/"Done today" only when today is actually the day picked — the
+    // date picker already names the day otherwise, so a fixed "Today" label
+    // over a group showing some OTHER day's tasks would just be wrong.
+    if (open.length) out.push({ key: 'open', label: isTodayPicked ? 'Today' : 'Open', tasks: open })
+    if (done.length) out.push({ key: 'done', label: isTodayPicked ? 'Done today' : 'Done', tasks: done })
     return out
-  }, [activeShown])
+  }, [activeShown, isTodayPicked])
   const selectedMember = roster.find(m => m.user_id === selected)
   /** "Your tasks", not "Sathvik's tasks" — reading your own name back at you in a
    *  heading is the same noise as "To: you" on your own task card. */
@@ -320,6 +334,28 @@ export function TeamScreen() {
 
       {/* ── tasks ────────────────────────────────────────────────────── */}
       <section>
+        {/* ── DAY PICKER ──────────────────────────────────────────────
+            Same control as Today's own: a native date input, not a week strip,
+            reaching any day in two taps with no horizontal scrolling. "Today" is
+            the way back once picked away from it — added here for the same
+            reason My Team's own comments already argued for staying one-day-at-
+            a-time: this is a snapshot, not the long view, and a picker you can
+            leave but not return to is a trap. */}
+        <div className="mb-3 flex items-center gap-2">
+          <input type="date" value={day} onChange={e => setDay(e.target.value || day)}
+                 aria-label="Show a different day"
+                 className="rounded-lg border px-2.5 py-1.5 text-[13px]"
+                 style={{ background: 'var(--bg)', borderColor: 'var(--border)',
+                          color: 'var(--text)' }} />
+          {!isTodayPicked && (
+            <button type="button" onClick={() => setDay(istDateKey(istNow()))}
+                    className="rounded-lg px-2.5 py-1.5 text-[12.5px] font-semibold"
+                    style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+              Today
+            </button>
+          )}
+        </div>
+
         {/* Just "Tasks".
             The heading used to name whose work was shown ("Your tasks", "Sathvik's
             tasks", "Everyone") — which restated the roster selection sitting a few
@@ -356,20 +392,18 @@ export function TeamScreen() {
         {!projects.loading && !memberTasks.loading && activeShown.length === 0 && (
           <Card>
             <EmptyState
-              /* Says TODAY, because that is what the list is scoped to when a
-                 member is picked. "Nothing open" would be a claim about their
-                 whole backlog, which this view no longer shows — and they may
-                 well have plenty, just not due today. */
-              /* Every one of these says TODAY, because that is what the list is
-                 scoped to. "No team projects" would be a claim about the whole
-                 board — which may well be full, just not for today. */
+              /* Says TODAY (or "that day" for a picked date), because that is
+                 what the list is scoped to. "Nothing open" would be a claim
+                 about a whole backlog, which this view no longer shows — and
+                 there may well be plenty, just not on this particular day. */
               title={headingName
-                ? (headingName === 'Your' ? 'Nothing on today'
-                   : `${selectedMember?.name} has nothing on today`)
-                : 'Nothing on today'}
+                ? (headingName === 'Your'
+                    ? (isTodayPicked ? 'Nothing on today' : 'Nothing that day')
+                    : `${selectedMember?.name} has nothing ${isTodayPicked ? 'on today' : 'that day'}`)
+                : (isTodayPicked ? 'Nothing on today' : 'Nothing that day')}
               body={selectedMember
-                ? 'Their tasks due today will show here.'
-                : "The team's tasks due today will show here."}
+                ? `Their tasks due ${isTodayPicked ? 'today' : 'that day'} will show here.`
+                : `The team's tasks due ${isTodayPicked ? 'today' : 'that day'} will show here.`}
               /* Desktop only, same reasoning as Today: on a phone this sits a short
                  scroll below the identical button in the section header, so both
                  would render as two calls to action for one thing. On desktop they
@@ -429,17 +463,18 @@ export function TeamScreen() {
            intent of pressing this button here — making you re-pick the same person
            inside the form is a step that can only be got wrong, and getting it
            wrong sends work to the wrong person.
-           seedDate is TODAY, always, because the whole screen is now today: a task
-           created for another day would file correctly and then disappear from the
-           list you are looking at, which reads as the create having failed. The
-           date is still editable in the form — this is the starting point, not a
-           restriction.
+           seedDate is the day PICKED above (defaults to today), not always today —
+           a task created while looking at another day should land on that day,
+           same reasoning as Today's own seedDate: otherwise it would file
+           correctly and then disappear from the list you are looking at, which
+           reads as the create having failed. Still editable in the form — this
+           is the starting point, not a restriction.
            A task for someone else lands on the team board automatically —
            NewTaskSheet forces is_project when the assignee is not you.
            `everyone`: only a lead, from the workspace view, gets an "Everyone" chip
            in the picker — see NewTaskSheet for what picking it does. */
         <NewTaskSheet
-          seedDate={istDateKey(istNow())}
+          seedDate={day}
           seedAssignee={selected ?? null}
           everyone={isTeamLead && selected === null ? everyoneElse : null}
           onClose={() => setCreating(false)}
