@@ -67,14 +67,16 @@ export function TodayScreen() {
    *  Thursday that files new work under today would be quietly wrong. */
   const [day, setDay] = useState<string>(() => istDateKey(istNow()))
   const isTodayPicked = day === istDateKey(istNow())
-  /** The time box beside the day picker. Starts on the current time rounded to
-   *  the nearest half-hour (see currentTime()) — this is a "preselect roughly
+  /** The time box beside the day picker. Starts on the current time rounded UP
+   *  to the next full hour (see currentTime()) — this is a "preselect roughly
    *  what I'm looking at right now" control, not the task form's own due-time
-   *  field, so it carries none of that field's overdue-safety rounding (which
-   *  always rounds UP). It is only actually PASSED to the form once the user has
-   *  touched it: an untouched default is not a choice, and a task created from
-   *  an untouched box should get the form's own normal default, not silently
-   *  inherit a time nobody picked. */
+   *  field. FREELY EDITABLE from there — no min/max, no step — because unlike
+   *  the default, a time the user deliberately typed or picked is their own
+   *  choice to get exactly right, not something this box should be narrowing.
+   *  It is only actually PASSED to the form once the user has touched it: an
+   *  untouched default is not a choice, and a task created from an untouched
+   *  box should get the form's own normal default, not silently inherit a time
+   *  nobody picked. */
   const [time, setTime] = useState<string>(currentTime)
   const [timePicked, setTimePicked] = useState(false)
 
@@ -244,18 +246,14 @@ export function TodayScreen() {
               </button>
             )}
             {/* ── TIME BOX ──────────────────────────────────────────────
-                Shown preselected at the current time rounded to the nearest
-                half-hour, nudgeable up to 30 minutes ahead — a short "now, or a
-                little from now" window. `step={1800}` (30 min, in seconds) is
-                what makes the BROWSER'S OWN picker only ever scroll in :00/:30
-                marks instead of every minute — see currentTime() for why the
-                default has to round to that same grid rather than showing the
-                exact minute. It does nothing on its own; it exists so "New task"
-                a moment later can open already pointed at the moment you were
-                just looking at, instead of asking you to re-enter a time you
-                basically just told this screen. */}
-            <input type="time" step={1800} value={time}
-                   min={currentTime()} max={addMinutes(currentTime(), 30)}
+                Shown preselected at the current time rounded UP to the next
+                full hour. No min/max, no step — free entry, any time at all —
+                because the default is a starting point, not a boundary: it
+                exists so "New task" a moment later can open already pointed at
+                the moment you were just looking at, instead of asking you to
+                re-enter a time you basically just told this screen, and that is
+                the ONLY thing it constrains. */}
+            <input type="time" value={time}
                    onChange={e => { setTime(e.target.value || time); setTimePicked(true) }}
                    aria-label="Preselect a time for a new task"
                    className="rounded-lg border px-2.5 py-1.5 text-[13px]"
@@ -440,30 +438,19 @@ export function TodayScreen() {
   )
 }
 
-/** "HH:MM" + minutes, wrapping past midnight. Used only to cap the Today time
- *  box 30 minutes ahead of "now" — plain string arithmetic, no Date needed. */
-function addMinutes(hhmm: string, minutes: number): string {
-  const [h, m] = hhmm.split(':').map(Number)
-  const total = (h * 60 + m + minutes + 1440) % 1440
-  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
-}
-
-/** The current time, IST, rounded to the NEAREST half-hour mark (never up or
- *  down on principle — 10:49 → 11:00, 10:15 → 10:30, 10:14 → 10:00). The time
- *  &lt;input&gt; below is stepped to 30 minutes, and a browser's native time picker
- *  only offers values landing exactly on the step — an unstepped value like the
- *  literal current minute would be off the grid it itself shows, so the default
- *  has to live on that same grid. Deliberately not `defaultTime()` from
- *  NewTaskSheet, which always rounds UP to keep a freshly created task from
- *  being born overdue — that concern belongs to due_at, not to this preselect. */
+/** The current time, IST, rounded UP to the next full hour — 10:49 → 11:00,
+ *  10:20 → 11:00, 10:00 stays 10:00 (already exact). Only the DEFAULT is
+ *  rounded; the input itself carries no min/max/step, so the user can freely
+ *  edit it to anything once it's showing. Deliberately not `defaultTime()` from
+ *  NewTaskSheet, which rounds up to the next HALF-hour to keep a freshly
+ *  created task from being born overdue — that concern belongs to due_at, not
+ *  to this preselect, which just wants a round number to start from. */
 function currentTime(): string {
   const [h, m] = new Intl.DateTimeFormat('en-GB', {
     hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata',
   }).format(new Date()).split(':').map(Number)
-  const roundedMinutes = Math.round(m / 30) * 30
-  const bumpedHour = roundedMinutes === 60
-  return `${String((h + (bumpedHour ? 1 : 0)) % 24).padStart(2, '0')}:${
-    String(bumpedHour ? 0 : roundedMinutes).padStart(2, '0')}`
+  const bumpedHour = m > 0
+  return `${String((h + (bumpedHour ? 1 : 0)) % 24).padStart(2, '0')}:00`
 }
 
 /**
