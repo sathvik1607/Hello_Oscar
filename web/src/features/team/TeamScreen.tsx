@@ -35,6 +35,10 @@ import {
 export function TeamScreen() {
   const me = getUser()
   const teamId = me?.team_id
+  /** Same field SettingsScreen already reads for this exact check — kept the same
+   *  rather than switching to `account_type`, which nothing else in the app
+   *  treats as the source of truth for it. */
+  const isTeamLead = me?.role === 'team_lead'
   /**
    * Opens on the WORKSPACE, not on you.
    *
@@ -131,7 +135,21 @@ export function TeamScreen() {
    * task sitting between two live ones answers a question nobody asked.
    */
   const shown = useMemo(() => {
-    const raw = selected ? (memberTasks.data?.tasks ?? []) : (projects.data?.tasks ?? [])
+    let raw = selected ? (memberTasks.data?.tasks ?? []) : (projects.data?.tasks ?? [])
+    /**
+     * 🔴 THE WORKSPACE VIEW IS LEAD-ONLY FOR THE FULL ROSTER. A regular member
+     * picking "ALUMNX AI LABS" (the workspace card) does not see every project
+     * task the way a lead does — only the ones they are personally part of,
+     * either side: something THEY delegated (`owner_user_id === me.id`, the
+     * creator) or something assigned TO them (`is_mine`). `is_mine` alone would
+     * miss the delegating half — a lead-less member who hands work to a peer
+     * still needs to see it here, not just the tasks landing on their own desk.
+     * A picked MEMBER's own list (`selected` truthy) is unaffected: that view
+     * is already scoped to one person by the roster tap itself.
+     */
+    if (!selected && !isTeamLead) {
+      raw = raw.filter(t => t.owner_user_id === me?.id || t.is_mine)
+    }
     /**
      * 🔴 THIS SCREEN IS TODAY ONLY — the workspace and a picked member alike.
      *
@@ -150,7 +168,7 @@ export function TeamScreen() {
     const closed = (t: Task) => t.status === 'completed' || t.status === 'cancelled'
     return [...scoped].sort((a, b) =>
       Number(closed(a)) - Number(closed(b)) || byDueAsc(a, b))
-  }, [selected, memberTasks.data, projects.data])
+  }, [selected, memberTasks.data, projects.data, isTeamLead, me?.id])
   const activeShown = shown.filter(t => t.status !== 'cancelled')
 
   /**
@@ -197,6 +215,10 @@ export function TeamScreen() {
   const headingName = selectedMember
     ? (selectedMember.user_id === me?.id ? 'Your' : `${selectedMember.name}'s`)
     : null
+  /** Every ACTIVE member other than the lead themself — a lead broadcasting to
+   *  "everyone" is handing out work, and a task addressed to yourself is not a
+   *  broadcast. */
+  const everyoneElse = roster.filter(m => m.user_id !== me?.id).map(m => m.user_id)
 
   if (!teamId) {
     return (
@@ -413,10 +435,13 @@ export function TeamScreen() {
            date is still editable in the form — this is the starting point, not a
            restriction.
            A task for someone else lands on the team board automatically —
-           NewTaskSheet forces is_project when the assignee is not you. */
+           NewTaskSheet forces is_project when the assignee is not you.
+           `everyone`: only a lead, from the workspace view, gets an "Everyone" chip
+           in the picker — see NewTaskSheet for what picking it does. */
         <NewTaskSheet
           seedDate={istDateKey(istNow())}
-          seedAssignees={selected ? [selected] : null}
+          seedAssignee={selected ?? null}
+          everyone={isTeamLead && selected === null ? everyoneElse : null}
           onClose={() => setCreating(false)}
           onCreated={() => {
             setCreating(false)

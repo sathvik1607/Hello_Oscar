@@ -24,7 +24,9 @@ import type { Task } from '../../lib/types'
  * timezone, so sending an ISO string with a Z would land the task hours off — and
  * a due time in the past is born overdue, which fires a reminder immediately.
  */
-export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedTime, seedAssignees }: {
+export function NewTaskSheet({
+  onClose, onCreated, task, seedDate, seedTime, seedAssignee, everyone, personalWhenSelf,
+}: {
   onClose: () => void
   onCreated: () => void
   /** Present = edit that task. Absent = create a new one. */
@@ -32,8 +34,8 @@ export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedTime, see
   /** Who to pre-select, when the opening screen already has a person in view — My
    *  Team with a member picked. Same reasoning as `seedDate`: the filter you are
    *  looking at IS the intent, and making you re-pick it is a step that can only go
-   *  wrong. Ignored when editing, which seeds from the task's own roster. */
-  seedAssignees?: number[] | null
+   *  wrong. Ignored when editing, which seeds from the task's own assignee. */
+  seedAssignee?: number | null
   /** "YYYY-MM-DD" (IST) to open the date field on. Passed by a screen that already
    *  has a day in view — Today, or a picked day on the calendar — so a task created
    *  from there lands on the day the user was looking at rather than silently on
@@ -45,6 +47,29 @@ export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedTime, see
    *  passed by Today when the user has actually touched its own time box, not on
    *  its unset default (see TodayScreen). Ignored when editing. */
   seedTime?: string | null
+  /**
+   * The ids an "Everyone" chip would reach, if offered at all. Present only for a
+   * team lead looking at the whole workspace (My Team, nobody narrowed) — everyone
+   * else never sees the chip, so this is `null`/absent for them rather than a
+   * permission check inside this form. Absent, empty, or editing an existing task
+   * ⇒ no chip, ordinary single-assignee picker only.
+   *
+   * 🔴 PICKING IT DOES NOT ASSIGN A SHARED TASK — it is a switch, not a selection.
+   * `broadcasting` (below) is what the picker and submit actually key off; see
+   * there for why a task addressed to everyone becomes N individual tasks.
+   */
+  everyone?: number[] | null
+  /**
+   * 🔴 TODAY ONLY — a self-assigned task created here is PERSONAL (`is_project:
+   * false`), not the usual "every new task is a team task" default. Today is where
+   * you jot down your own next thing, not where you publish to the team board, and
+   * the two screens disagreeing on this is deliberate: My Team is never opened to
+   * create work for yourself in the first place, so it keeps the old default
+   * unconditionally. Has no effect once `delegated` is true (self-assigned is the
+   * only case this changes) or while editing (an existing task keeps its own
+   * value, same as `isProject` below).
+   */
+  personalWhenSelf?: boolean
 }) {
   const editing = Boolean(task)
   // Seeded from the task when editing. `due_at` arrives IST-naive
@@ -55,43 +80,45 @@ export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedTime, see
   const seededTime = task?.due_at ? task.due_at.slice(11, 16) : (seedTime ?? null)
   const me = getUser()
   /**
-   * Who the task is FOR. The form had no such field, so every task created from
-   * the web was silently self-assigned — while `POST /items` has always accepted
-   * `assigned_to_user_ids`. A lead could not hand work to anyone without asking
-   * Oscar to do it in words.
+   * Who the task is FOR — exactly one person, never a shared roster, UNLESS
+   * "Everyone" is picked (see `broadcasting`). The form had no assignee field at
+   * all once, so every task created from the web was silently self-assigned; a
+   * lead could not hand work to anyone without asking Oscar to do it in words.
+   * `pa_item_assignees` can hold more than one person per task, but a task shared
+   * across several people is not what a normal pick builds any more — "Everyone"
+   * reaches several people by creating several ordinary single-assignee tasks
+   * instead, not one shared one (see submit()).
    *
    * 🔴 PICKED FROM THE TEAM, never typed. Task assignee resolution is team-scoped,
    * but the agent's MEETING invitee resolution is not, and this project already has
-   * a wrong-person incident from loose name matching. Sending ids from a list of
+   * a wrong-person incident from loose name matching. Sending an id from a list of
    * actual members removes the question entirely.
-   *
-   * Multi-select because `pa_item_assignees` exists precisely for shared work —
-   * each assignee carries their own status, and `is_mine` is true for any of them.
-   * Empty means self-assigned, which is what happens today.
    */
   const members = useApi(s => (me?.team_id ? teamApi.members(me.team_id, s) : Promise.resolve([])),
                          [me?.team_id])
-  const [assignees, setAssignees] = useState<number[]>(() => {
-    // Seeded from the roster when editing, so saving a retitle cannot drop who is
-    // on it. Falls back to the primary for a task with no roster rows.
-    const roster = (task?.assignees ?? []).map(a => a.user_id).filter(Boolean)
-    if (roster.length) return roster
-    if (task) return task.assigned_to_user_id ? [task.assigned_to_user_id] : []
+  /** Is "Everyone" the current pick? A chip like any other in the picker, not a
+   *  separate mode the caller has to reach for — toggling it just replaces
+   *  `assignee` the same way picking a person does. */
+  const [broadcasting, setBroadcasting] = useState(false)
+  const [assignee, setAssignee] = useState<number | null>(() => {
+    // Seeded from the task's own assignee when editing.
+    if (task) return task.assigned_to_user_id ?? null
     // A screen that already has somebody selected passes them, and that wins over
     // the self default — on My Team with a member picked, the task is for THEM.
-    if (seedAssignees?.length) return seedAssignees
-    // 🔴 A NEW TASK STARTS ASSIGNED TO YOU, VISIBLY. An empty list already MEANT
+    if (seedAssignee != null) return seedAssignee
+    // 🔴 A NEW TASK STARTS ASSIGNED TO YOU, VISIBLY. `null` already MEANT
     // self-assigned — create_item self-assigns when no assignee is given — but
     // nothing on the form said so: every teammate chip sat unselected, so the
     // honest reading was "assigned to nobody", and the most common action (a task
     // for yourself) was the one with no visible state. Pre-selecting says what will
     // happen, and deselecting yourself still resolves to you server-side.
-    return me?.id ? [me.id] : []
+    return me?.id ?? null
   })
   /** Is this task going to someone OTHER than me? Yourself-only is not delegation,
    *  and conflating the two is what would silently turn every personal task into a
-   *  team one now that you are pre-selected. */
-  const delegated = assignees.some(id => id !== me?.id)
+   *  team one now that you are pre-selected. "Everyone" is always delegation —
+   *  it is, by definition, work for people other than just you. */
+  const delegated = broadcasting || (assignee != null && assignee !== me?.id)
   /**
    * Project task (default) vs personal — the same switch the Flutter sheet has, and
    * the web form simply never sent the field, so every task created here was a
@@ -99,15 +126,20 @@ export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedTime, see
    * `GET /teams/{id}/tasks?project=true`, which is My Team.
    */
   /**
-   * Always a project (team) task. The form no longer offers the choice — see the
-   * "Team task" row below — so this is a constant rather than state.
+   * A project (team) task by default. The form no longer offers the choice — see
+   * the "Team task" row below — so this is a derived constant rather than state.
    *
    * 🔴 EDITING KEEPS THE TASK'S OWN VALUE. A personal task created before this
    * change, or by Flutter (which still has the switch), must not be silently
-   * published to the team board just because someone fixed its title here. Only a
-   * NEW task is forced to true.
+   * published to the team board just because someone fixed its title here.
+   *
+   * A NEW task defaults to true UNLESS `personalWhenSelf` opted in (Today) and
+   * this particular new task is self-assigned — see that prop's own comment for
+   * why My Team never takes this branch.
    */
-  const isProject = task ? (task.is_project !== 0 && task.is_project !== false) : true
+  const isProject = task
+    ? (task.is_project !== 0 && task.is_project !== false)
+    : !(personalWhenSelf && !delegated)
   const [title, setTitle] = useState(task?.title ?? '')
   const [date, setDate] = useState(seededDate ?? istDateKey(istNow()))
   const [time, setTime] = useState(seededTime ?? defaultTime())
@@ -171,29 +203,39 @@ export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedTime, see
           // path that reconciles pa_item_assignees through set_assignees — sending
           // the plural here would move the legacy column and leave the roster
           // stale, which is the documented "reassignment did nothing" bug.
-          ...(assignees.length === 1 ? { assigned_to_user_id: assignees[0] } : {}),
+          ...(assignee != null ? { assigned_to_user_id: assignee } : {}),
         })
       } else {
-        await tasksApi.create({
+        const base = {
           title: t,
           ...(description.trim() ? { description: description.trim() } : {}),
           due_at,
           priority,
           is_all_day: isAnytime,
-          // Omitted when empty so the backend's own self-assign default applies,
-          // rather than this client deciding what "nobody" means.
-          ...(assignees.length ? { assigned_to_user_ids: assignees } : {}),
           // 🔴 DELEGATED ⇒ ALWAYS A PROJECT TASK. Handing work to a teammate is
           // team work by definition, and a personal task assigned to someone else
           // would be invisible to the lead who has to track it.
-          //
-          // 🔴 But "delegated" means SOMEONE ELSE, not "has an assignee" — and that
-          // distinction became load-bearing the moment a new task started
-          // pre-assigned to you. `assignees.length ? true : isProject` was correct
-          // only while an empty list meant yourself; with yourself selected it made
-          // EVERY task a project task, publishing personal work to the team board.
           is_project: delegated ? true : isProject,
-        })
+        }
+        if (broadcasting && everyone?.length) {
+          // 🔴 N SEPARATE CREATES, SEQUENTIAL — not one call with every id, and not
+          // Promise.all. Each is a real write against a shared backend, and firing
+          // them in parallel is how you get a handful of silent timeouts on a cold
+          // instance with no way to tell which member never got their task. One
+          // failure is surfaced and stops the loop rather than being swallowed —
+          // a lead who asked for "everyone" needs to know if only six of nine
+          // actually got a task, not a generic success toast.
+          for (const id of everyone) {
+            await tasksApi.create({ ...base, assigned_to_user_id: id })
+          }
+        } else {
+          await tasksApi.create({
+            ...base,
+            // Omitted when unset so the backend's own self-assign default applies,
+            // rather than this client deciding what "nobody" means.
+            ...(assignee != null ? { assigned_to_user_id: assignee } : {}),
+          })
+        }
       }
       onCreated()
     } catch (e2) {
@@ -311,18 +353,49 @@ export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedTime, see
               for when a title alone loses something — an address, a spec, what
               "follow up" actually meant. Same wording and shape as the Flutter
               sheet, so the two clients do not name one field two ways. */}
-          <Field label="Assign to">
+          <Field label="Assign to"
+                 hint={broadcasting
+                   ? `${everyone?.length ?? 0} separate tasks will be created, one per member`
+                   : undefined}>
             <div className="flex flex-wrap gap-1.5">
+              {/* 🔴 A CHIP, NOT A SEPARATE CONTROL — offered only to a team lead
+                  looking at the whole workspace (see `everyone` above), and it sits
+                  FIRST so picking the whole team reads as one more option in the
+                  same list rather than a special second step. Picking it does not
+                  select an assignee; it flips `broadcasting`, which is what submit()
+                  actually keys off to loop N individual creates instead of sending
+                  one. */}
+              {everyone?.length ? (
+                <button type="button" title="Everyone"
+                        onClick={() => { setBroadcasting(v => !v); setAssignee(null) }}
+                        className="rounded-full border px-2.5 py-1 text-[12.5px]
+                                   transition hover:brightness-95"
+                        style={broadcasting
+                          ? { background: 'var(--accent)', color: '#fff',
+                              borderColor: 'var(--accent)' }
+                          : { background: 'var(--bg)', borderColor: 'var(--border)',
+                              color: 'var(--text-muted)' }}>
+                  {broadcasting && '✓ '}Everyone
+                </button>
+              ) : null}
               {(members.data ?? [])
                 .filter(mm => mm.is_active)
                 .map(mm => {
-                  const on = assignees.includes(mm.user_id)
+                  const on = !broadcasting && assignee === mm.user_id
                   return (
                     <button key={mm.user_id} type="button"
                             title={mm.name}
-                            onClick={() => setAssignees(v => on
-                              ? v.filter(x => x !== mm.user_id)
-                              : [...v, mm.user_id])}
+                            // Single-select: picking someone else REPLACES the
+                            // current pick rather than adding to it — a task has
+                            // one owner. Tapping the already-picked one clears
+                            // it back to unassigned rather than being a no-op,
+                            // so there is still a way to reach "nobody" without
+                            // a separate control for it. Picking a person also
+                            // turns "Everyone" back off, same as the reverse.
+                            onClick={() => {
+                              setBroadcasting(false)
+                              setAssignee(v => v === mm.user_id ? null : mm.user_id)
+                            }}
                             className="rounded-full border px-2.5 py-1 text-[12.5px]
                                        transition hover:brightness-95"
                             style={on
@@ -350,23 +423,26 @@ export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedTime, see
             </div>
           </Field>
 
-          {/* 🔴 EVERY TASK IS A TEAM TASK — a statement, not a switch.
-              This was a Project/Personal toggle defaulting to ON. It is now fixed
-              on, and the row just SAYS so: a control whose only sensible setting is
-              the default is a decision handed to the user for no reason, and the
-              one thing it could do was quietly hide a task from the team board.
-              A line of text cannot be left in the wrong position by accident.
-              Still hidden when delegated, as before — handing work to a teammate is
-              team work by definition, so `delegated ? true : isProject` (unchanged
-              in submit) now resolves to true either way. */}
-          {!delegated && (
+          {/* A statement, not a switch — the form no longer offers a Project/
+              Personal toggle, so this just SAYS what submit's own
+              `delegated ? true : isProject` is actually about to send. Shown for
+              every combination now, delegated included: picking a teammate on
+              Today is exactly the case that needs the confirmation, since a
+              self-assigned task there is personal (see `personalWhenSelf`) and
+              a silent row would leave "did picking them just make this a team
+              task?" unanswered. Only hidden while editing — an existing task's
+              own is_project is not something this row should be restating as
+              if it were a fresh decision. */}
+          {!task && (
             <div className="flex w-full items-center gap-2.5 rounded-xl border px-3 py-2"
                  style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}>
               <Users className="size-4 shrink-0" style={{ color: 'var(--text-subtle)' }} />
               <span className="min-w-0 flex-1">
-                <span className="block text-[13.5px] font-medium">Team task</span>
+                <span className="block text-[13.5px] font-medium">
+                  {delegated || isProject ? 'Team task' : 'Personal task'}
+                </span>
                 <span className="block text-[12px]" style={{ color: 'var(--text-subtle)' }}>
-                  Shared with your team
+                  {delegated || isProject ? 'Shared with your team' : 'Only visible to you'}
                 </span>
               </span>
             </div>
@@ -377,7 +453,9 @@ export function NewTaskSheet({ onClose, onCreated, task, seedDate, seedTime, see
           <div className="flex gap-2 pt-1">
             <Button type="submit" variant="primary" loading={busy}
                     disabled={!title.trim()} className="flex-1">
-              {editing ? 'Save changes' : 'Create task'}
+              {editing ? 'Save changes'
+                : broadcasting ? `Create for everyone (${everyone?.length ?? 0})`
+                : 'Create task'}
             </Button>
             <Button type="button" onClick={onClose}>Cancel</Button>
           </div>
