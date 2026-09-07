@@ -248,6 +248,28 @@ export function TeamScreen() {
 
   return (
     <div className="space-y-7">
+      {/* ── DAY PICKER ──────────────────────────────────────────────
+          Same control as Today's own: a native date input, not a week strip,
+          reaching any day in two taps with no horizontal scrolling. "Today" is
+          the way back once picked away from it. Sits ABOVE the roster —
+          the day being viewed is a fact that applies to everything below it
+          (who's on what, AND their tasks), so it reads as the screen's own
+          setting rather than something buried inside the tasks section alone. */}
+      <div className="flex items-center gap-2">
+        <input type="date" value={day} onChange={e => setDay(e.target.value || day)}
+               aria-label="Show a different day"
+               className="rounded-lg border px-2.5 py-1.5 text-[13px]"
+               style={{ background: 'var(--bg)', borderColor: 'var(--border)',
+                        color: 'var(--text)' }} />
+        {!isTodayPicked && (
+          <button type="button" onClick={() => setDay(istDateKey(istNow()))}
+                  className="rounded-lg px-2.5 py-1.5 text-[12.5px] font-semibold"
+                  style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+            Today
+          </button>
+        )}
+      </div>
+
       {/* ── roster ───────────────────────────────────────────────────── */}
       <section>
         {/* "Members", not the team name. The name was on screen THREE times — this
@@ -334,28 +356,6 @@ export function TeamScreen() {
 
       {/* ── tasks ────────────────────────────────────────────────────── */}
       <section>
-        {/* ── DAY PICKER ──────────────────────────────────────────────
-            Same control as Today's own: a native date input, not a week strip,
-            reaching any day in two taps with no horizontal scrolling. "Today" is
-            the way back once picked away from it — added here for the same
-            reason My Team's own comments already argued for staying one-day-at-
-            a-time: this is a snapshot, not the long view, and a picker you can
-            leave but not return to is a trap. */}
-        <div className="mb-3 flex items-center gap-2">
-          <input type="date" value={day} onChange={e => setDay(e.target.value || day)}
-                 aria-label="Show a different day"
-                 className="rounded-lg border px-2.5 py-1.5 text-[13px]"
-                 style={{ background: 'var(--bg)', borderColor: 'var(--border)',
-                          color: 'var(--text)' }} />
-          {!isTodayPicked && (
-            <button type="button" onClick={() => setDay(istDateKey(istNow()))}
-                    className="rounded-lg px-2.5 py-1.5 text-[12.5px] font-semibold"
-                    style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
-              Today
-            </button>
-          )}
-        </div>
-
         {/* Just "Tasks".
             The heading used to name whose work was shown ("Your tasks", "Sathvik's
             tasks", "Everyone") — which restated the roster selection sitting a few
