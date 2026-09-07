@@ -57,8 +57,25 @@ export function EditMeetingSheet({ meeting, onClose, onSaved, defaultDate }: {
   const [date, setDate] = useState(startDate)
   const [from, setFrom] = useState(startTime)
   const [to, setTo] = useState(endTime)
-  const [location, setLocation] = useState(meeting?.location ?? '')
-  const [description, setDescription] = useState(meeting?.description ?? '')
+  /**
+   * DURATION, not a bare end time — the mobile sheet picks a length (30m/45m/1h/
+   * Custom) rather than asking for a second clock reading, and a length is what
+   * most meetings actually are ("half an hour with Anil"), not a specific end
+   * clock time somebody is choosing on purpose. `custom` is the escape hatch
+   * back to a manual end time, which is all the form offered before this.
+   *
+   * Seeded from the ACTUAL gap when editing, snapped to the nearest quick pick
+   * only if it lands exactly on one — an odd 40-minute meeting must not silently
+   * relabel itself as 45 the moment you open it to change the title.
+   */
+  const [duration, setDuration] = useState<'30' | '45' | '60' | 'custom'>(() => {
+    if (!startTime || !endTime) return '30'
+    const mins = minutesBetween(startTime, endTime)
+    return mins === 30 ? '30' : mins === 45 ? '45' : mins === 60 ? '60' : 'custom'
+  })
+  /** The end time actually SENT — derived from start+duration unless `custom`,
+   *  where `to` (the manual field) is the source of truth instead. */
+  const effectiveTo = duration === 'custom' ? to : addMinutesTime(from, Number(duration))
   const me = getUser()
   const members = useApi(s => (me?.team_id ? teamApi.members(me.team_id, s) : Promise.resolve([])),
                          [me?.team_id])
@@ -92,8 +109,9 @@ export function EditMeetingSheet({ meeting, onClose, onSaved, defaultDate }: {
     if (!t || !date || !from || busy) return
     // Caught here rather than by the backend: an end before the start produces a
     // meeting with a negative duration, which the conflict checker then reasons
-    // about incorrectly instead of rejecting.
-    if (to && to <= from) {
+    // about incorrectly instead of rejecting. Only reachable via Custom now — a
+    // quick-pick duration is always computed forward from `from`.
+    if (effectiveTo && effectiveTo <= from) {
       setErr('The end time has to be after the start time.')
       return
     }
@@ -102,28 +120,17 @@ export function EditMeetingSheet({ meeting, onClose, onSaved, defaultDate }: {
       if (creating) {
         // POST /meetings, the endpoint that has existed all along with no UI behind
         // it. Times assembled from the PARTS, exactly as the edit path does.
-        const r = await meetingsApi.create({
+        // 🔴 NO location/description — this form mirrors mobile's Schedule Meeting
+        // screen, which has neither field at all. (An existing meeting created with
+        // one some other way, e.g. by the agent, keeps it untouched: this form
+        // simply never asks about it.)
+        await meetingsApi.create({
           title: t,
           scheduled_at: `${date}T${from}:00`,
-          ...(to ? { ends_at: `${date}T${to}:00` } : {}),
-          location: location.trim(),
-          description: description.trim(),
+          ...(effectiveTo ? { ends_at: `${date}T${effectiveTo}:00` } : {}),
           ...(invitees.length ? { attendee_user_ids: invitees } : {}),
           ...(guestList().length ? { attendees: guestList() } : {}),
         })
-        // 🔴 POST /meetings DISCARDS `description` — MeetingCreateRequest has no
-        // such field and Pydantic drops unknown keys silently, so the notes above
-        // never reach the row. PATCH /items does accept it, so persist them with a
-        // follow-up write rather than losing what the user typed.
-        //
-        // Best-effort on purpose: the meeting itself is already created and is the
-        // thing that matters. Failing the whole save here would report an error for
-        // a meeting that exists, and the user would create it twice.
-        const notes = description.trim()
-        if (notes && r?.meeting?.id) {
-          try { await tasksApi.update(r.meeting.id, { description: notes }) }
-          catch { /* notes lost, meeting kept — recoverable by editing it */ }
-        }
         onSaved()
         return
       }
@@ -140,9 +147,10 @@ export function EditMeetingSheet({ meeting, onClose, onSaved, defaultDate }: {
         scheduled_at: `${date}T${from}:00`,
         // Omitted when blank rather than sent empty — the backend derives a default
         // duration, and an empty string would fail to parse.
-        ...(to ? { ends_at: `${date}T${to}:00` } : {}),
-        location: location.trim(),
-        description: description.trim(),
+        ...(effectiveTo ? { ends_at: `${date}T${effectiveTo}:00` } : {}),
+        // 🔴 location/description are NOT sent here either — omitted, not emptied,
+        // so editing a meeting that already has one (created some other way) keeps
+        // it rather than this form silently blanking it out.
       })
       onSaved()
     } catch (e2) {
@@ -179,40 +187,86 @@ export function EditMeetingSheet({ meeting, onClose, onSaved, defaultDate }: {
                    className={inputCls} style={inputStyle} placeholder="Meeting title" />
           </Field>
 
-          {/* Date, from and to on one line — they are one thought. */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div className="col-span-2">
-              <Field label="Date">
-                <input type="date" value={date} onChange={e => setDate(e.target.value)}
-                       className={inputCls} style={inputStyle} />
-              </Field>
-            </div>
+          {/* Date and start time on one line — they are one thought. The
+              computed range underneath is the same confirmation mobile shows
+              in its own header ("Mon, Sep 7" · "5:00 PM – 5:45 PM") — the two
+              input boxes are for CHANGING the time, this line is for reading
+              back what they currently mean, together with the duration. */}
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Date">
+              <input type="date" value={date} onChange={e => setDate(e.target.value)}
+                     className={inputCls} style={inputStyle} />
+            </Field>
             <Field label="From">
               <input type="time" value={from} onChange={e => setFrom(e.target.value)}
                      className={inputCls} style={inputStyle} />
             </Field>
+          </div>
+          {from && effectiveTo && (
+            <p className="-mt-2 text-[12.5px]" style={{ color: 'var(--text-subtle)' }}>
+              {timeLabel12(from)} – {timeLabel12(effectiveTo)}
+            </p>
+          )}
+
+          {/* DURATION, not a bare end-time field — mirrors the mobile sheet's
+              30m/45m/1h/Custom row. Quick picks compute the end time from `from`
+              (see effectiveTo); Custom is the only path that still asks for a
+              manual clock reading, and only then does a "To" field appear. The
+              computed end time is confirmed by the range line above, not
+              repeated here as well. */}
+          <Field label="For">
+            <div className="flex flex-wrap gap-1.5">
+              {(['30', '45', '60'] as const).map(mins => (
+                <button key={mins} type="button" onClick={() => setDuration(mins)}
+                        className="rounded-full border px-3 py-1.5 text-[12.5px] font-medium
+                                   transition hover:brightness-95"
+                        style={duration === mins
+                          ? { background: 'var(--accent)', color: '#fff',
+                              borderColor: 'var(--accent)' }
+                          : { background: 'var(--bg)', borderColor: 'var(--border)',
+                              color: 'var(--text-muted)' }}>
+                  {mins === '60' ? '1h' : `${mins}m`}
+                </button>
+              ))}
+              <button type="button"
+                      onClick={() => {
+                        // Seeds the manual field from whatever the quick pick was
+                        // about to send, so switching to Custom starts from the
+                        // same end time rather than snapping back to blank.
+                        if (duration !== 'custom') setTo(effectiveTo)
+                        setDuration('custom')
+                      }}
+                      className="rounded-full border px-3 py-1.5 text-[12.5px] font-medium
+                                 transition hover:brightness-95"
+                      style={duration === 'custom'
+                        ? { background: 'var(--accent)', color: '#fff',
+                            borderColor: 'var(--accent)' }
+                        : { background: 'var(--bg)', borderColor: 'var(--border)',
+                            color: 'var(--text-muted)' }}>
+                Custom
+              </button>
+            </div>
+          </Field>
+
+          {duration === 'custom' && (
             <Field label="To" hint="Optional">
               <input type="time" value={to} onChange={e => setTo(e.target.value)}
                      className={inputCls} style={inputStyle} />
             </Field>
-          </div>
+          )}
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Location" hint="Optional">
-              <input value={location} onChange={e => setLocation(e.target.value)}
-                     className={inputCls} style={inputStyle}
-                     placeholder="Room, or a meeting link" />
-            </Field>
-            <Field label="Other guests" hint="Comma separated · not notified">
-              <input value={guests} onChange={e => setGuests(e.target.value)}
-                     className={inputCls} style={inputStyle}
-                     // Roles, not names. A placeholder that reads like a real person invites
-                     // the guess that it IS one — and these names go nowhere near a
-                     // notification, so an example that looks like a contact is misleading
-                     // twice over.
-                     placeholder="Client name, vendor contact" />
-            </Field>
-          </div>
+          {/* Location was removed here — mobile's Schedule Meeting screen has no
+              such field, and this form now mirrors it. An existing meeting with a
+              location (set some other way) keeps it; see submit() for why. */}
+          <Field label="Other guests" hint="Comma separated · not notified">
+            <input value={guests} onChange={e => setGuests(e.target.value)}
+                   className={inputCls} style={inputStyle}
+                   // Roles, not names. A placeholder that reads like a real person invites
+                   // the guess that it IS one — and these names go nowhere near a
+                   // notification, so an example that looks like a contact is misleading
+                   // twice over.
+                   placeholder="Client name, vendor contact" />
+          </Field>
 
           {/* 🔴 "not notified" above is literal. Those names join into one VARCHAR
               that cannot be FK'd to a user, so there is nobody to push to and no
@@ -250,13 +304,6 @@ export function EditMeetingSheet({ meeting, onClose, onSaved, defaultDate }: {
             </div>
           </Field>
 
-          <Field label="Notes" hint="Optional">
-            <textarea value={description} onChange={e => setDescription(e.target.value)}
-                      rows={2} className={inputCls}
-                      style={{ ...inputStyle, resize: 'none' }}
-                      placeholder="Agenda, links, anything to remember" />
-          </Field>
-
           {err && <p className="text-[13px]" style={{ color: '#DC2626' }}>{err}</p>}
 
           <div className="flex gap-2 pt-1">
@@ -270,4 +317,31 @@ export function EditMeetingSheet({ meeting, onClose, onSaved, defaultDate }: {
       </div>
     </Portal>
   )
+}
+
+/** Minutes between two "HH:MM" strings, same-day only (a meeting spanning
+ *  midnight isn't a case this form's single date field can express anyway). */
+function minutesBetween(from: string, to: string): number {
+  const [fh, fm] = from.split(':').map(Number)
+  const [th, tm] = to.split(':').map(Number)
+  return (th * 60 + tm) - (fh * 60 + fm)
+}
+
+/** "HH:MM" + minutes, wrapping past midnight — used to compute a duration
+ *  quick-pick's end time from the start time. */
+function addMinutesTime(hhmm: string, minutes: number): string {
+  const [h, m] = hhmm.split(':').map(Number)
+  const total = (h * 60 + m + minutes + 1440) % 1440
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+}
+
+/** "HH:MM" → "5:00 pm" — a plain string transform, deliberately NOT built on a
+ *  Date (this file's own rule: these values are IST-naive parts, and routing
+ *  them through `new Date(...)`/timeLabel would risk the browser's own offset
+ *  getting applied to a value that never had one). */
+function timeLabel12(hhmm: string): string {
+  const [h, m] = hhmm.split(':').map(Number)
+  const period = h < 12 ? 'am' : 'pm'
+  const h12 = h % 12 === 0 ? 12 : h % 12
+  return `${h12}:${String(m).padStart(2, '0')} ${period}`
 }
