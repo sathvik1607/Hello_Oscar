@@ -3,7 +3,7 @@ import {
   closestCenter, DndContext, DragOverlay, PointerSensor, useDraggable, useDroppable,
   useSensor, useSensors, type DragEndEvent, type DragStartEvent,
 } from '@dnd-kit/core'
-import { GripVertical } from 'lucide-react'
+import { GripVertical, X } from 'lucide-react'
 import { tasks as tasksApi, ApiError } from '../../lib/api'
 import { isReallyOverdue, istDateKey, istNow } from '../../lib/format'
 import type { Task } from '../../lib/types'
@@ -13,11 +13,15 @@ import { Badge, cx, STATUS_LABEL } from '../../ui'
  * Today's "Edit mode" — a day-view time axis, mirroring the mobile app's own
  * hold-and-drag reschedule (`Edit mode · Hold and drag a task to change…`).
  *
- * A ROW PER HALF-HOUR, 6 AM–10 PM by default — but that is an OUTER bound, not
+ * A ROW PER HALF-HOUR, 6 AM–11 PM by default — but that is an OUTER bound, not
  * a fixed range shown regardless of what's on the day. See buildSlots for the
- * actual rule: leading empty rows before the first task are trimmed (a day
- * whose first task is at 10 AM starts the grid at 10 AM, not 6), and a task
- * genuinely after 10 PM extends the grid rather than being clipped.
+ * bucket rule (leading empty rows before the first task are trimmed, a task
+ * genuinely after 11 PM extends the grid rather than being clipped) and the
+ * `visibleSlots` filter just below the state for the SECOND trim: an empty
+ * row already in the past is dropped entirely — it holds nothing and the
+ * past-slot guard already refuses a drop onto it, so keeping it visible would
+ * only be dead space. An empty FUTURE row stays, since that is exactly where
+ * a reschedule or an anytime promotion lands.
  *
  * Multiple tasks landing in the same slot sit in one HORIZONTALLY SCROLLING
  * row rather than stacking taller — a bucket is a fixed-height lane on
@@ -75,6 +79,11 @@ export function TimelineEditor({ tasks, anytimeTasks, day, onChanged }: {
    *  landed — the row really did become `critical` and left that list) or on
    *  rollback. */
   const [promoted, setPromoted] = useState<Set<number>>(new Set())
+  /** The task whose date/time popup is open — a click alternative to
+   *  dragging, for when the target slot isn't visible or a different DAY is
+   *  needed (dragging only ever changes the time, never the date). `null` =
+   *  closed. */
+  const [editingTask, setEditingTask] = useState<Task | null>(null)
 
   const slotOf = (t: Task) => pending.get(t.id) ?? (t.due_at ? t.due_at.slice(11, 16) : null)
   const allDraggable = useMemo(
@@ -106,6 +115,10 @@ export function TimelineEditor({ tasks, anytimeTasks, day, onChanged }: {
     () => [...tasks, ...anytimeTasks.filter(t => promoted.has(t.id))],
     [tasks, anytimeTasks, promoted])
   const slots = useMemo(() => buildSlots(gridTasks, slotOf), [gridTasks, pending])
+  // Drop empty PAST rows — nothing is in them and the past-slot guard already
+  // refuses a drop onto one, so they are not even a usable target, just dead
+  // space. An empty FUTURE row stays: it is a real drop target.
+  const visibleSlots = slots.filter(s => s.items.length > 0 || !isPastSlot(s.key))
   // The bar shows every anytime task NOT yet promoted.
   const barTasks = anytimeTasks.filter(t => !promoted.has(t.id))
 
@@ -170,7 +183,23 @@ export function TimelineEditor({ tasks, anytimeTasks, day, onChanged }: {
     }
   }
 
-  if (slots.length === 0) return null
+  /** The popup's own save path — separate from `handleDragEnd` because it can
+   *  change the DATE too, not just the time-of-day a drag is limited to. */
+  async function saveEdit(taskId: number, dueAt: string) {
+    setBusyId(taskId)
+    setErr(null)
+    try {
+      await tasksApi.update(taskId, { due_at: dueAt })
+      setEditingTask(null)
+      onChanged()
+    } catch (e2) {
+      setErr(e2 instanceof ApiError ? e2.message : String(e2))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  if (visibleSlots.length === 0) return null
 
   return (
     <DndContext sensors={sensors}
@@ -203,16 +232,22 @@ export function TimelineEditor({ tasks, anytimeTasks, day, onChanged }: {
                style={{ borderColor: 'var(--border)', background: 'var(--bg-sunken)' }}>
             {barTasks.map(t => (
               <DraggableTaskChip key={t.id} task={t} busy={busyId === t.id}
-                                 hidden={draggingTask?.id === t.id} />
+                                 hidden={draggingTask?.id === t.id}
+                                 onOpenEdit={() => setEditingTask(t)} />
             ))}
           </div>
         </div>
       )}
       <div className="overflow-hidden rounded-xl border" style={{ borderColor: 'var(--border)' }}>
-        {slots.map(({ key, label, items }, i) => (
+        {/* An empty row that is ALSO in the past is worth nothing — nothing is
+            there, and the past-slot guard already refuses a drop onto it, so
+            it is not even a usable target. A FUTURE empty row stays: it is
+            exactly where a reschedule or an anytime promotion lands next. */}
+        {visibleSlots.map(({ key, label, items }, i) => (
           <SlotRow key={key} slotKey={key} label={label} tasks={items}
                    busyId={busyId} draggingId={draggingTask?.id ?? null}
-                   past={isPastSlot(key)} isLast={i === slots.length - 1} />
+                   past={isPastSlot(key)} isLast={i === visibleSlots.length - 1}
+                   onOpenEdit={setEditingTask} />
         ))}
       </div>
       {/* Renders through a portal at the document root — never a descendant
@@ -222,13 +257,19 @@ export function TimelineEditor({ tasks, anytimeTasks, day, onChanged }: {
         {draggingTask && <TaskChipContent task={draggingTask} overlay />}
       </DragOverlay>
       {err && <p className="mt-2 text-[13px]" style={{ color: '#DC2626' }}>{err}</p>}
+      {editingTask && (
+        <EditTimePopup task={editingTask} day={day} busy={busyId === editingTask.id}
+                       onCancel={() => setEditingTask(null)}
+                       onSave={dueAt => void saveEdit(editingTask.id, dueAt)} />
+      )}
     </DndContext>
   )
 }
 
-function SlotRow({ slotKey, label, tasks, busyId, draggingId, past, isLast }: {
+function SlotRow({ slotKey, label, tasks, busyId, draggingId, past, isLast, onOpenEdit }: {
   slotKey: string; label: string; tasks: Task[]
   busyId: number | null; draggingId: number | null; past: boolean; isLast: boolean
+  onOpenEdit: (task: Task) => void
 }) {
   // `disabled` is a REAL guarantee from the library — over this row never
   // fires, so a fast release can't land here even a frame before the
@@ -251,7 +292,8 @@ function SlotRow({ slotKey, label, tasks, busyId, draggingId, past, isLast }: {
       <div className="flex min-h-[52px] flex-1 items-center gap-2 overflow-x-auto p-2">
         {tasks.map(t => (
           <DraggableTaskChip key={t.id} task={t} busy={busyId === t.id}
-                             hidden={draggingId === t.id} />
+                             hidden={draggingId === t.id}
+                             onOpenEdit={() => onOpenEdit(t)} />
         ))}
         {tasks.length === 0 && (
           <span className="text-[12px]" style={{ color: 'var(--text-subtle)' }}>
@@ -273,12 +315,20 @@ function SlotRow({ slotKey, label, tasks, busyId, draggingId, past, isLast }: {
  * out (`hidden`) the moment its drag starts, rather than sliding along a CSS
  * transform that a scrolling row would clip the instant it crossed that row's
  * own edge. */
-function DraggableTaskChip({ task, busy, hidden }: {
-  task: Task; busy: boolean; hidden: boolean
+function DraggableTaskChip({ task, busy, hidden, onOpenEdit }: {
+  task: Task; busy: boolean; hidden: boolean; onOpenEdit: () => void
 }) {
   const { attributes, listeners, setNodeRef } = useDraggable({ id: task.id })
+  // 🔴 A PLAIN onClick, not a listener wired through dnd-kit — the library
+  // only ever calls onDragStart/onDragEnd once the pointer has moved past the
+  // sensor's own activation distance (8px, see `sensors` above); a genuine
+  // tap that never crosses that threshold releases with no drag ever having
+  // started, and the browser's own click fires normally. So a tap opens the
+  // popup and a hold-and-move still drags — no extra bookkeeping needed to
+  // tell them apart.
   return (
     <div ref={setNodeRef} {...listeners} {...attributes}
+         onClick={onOpenEdit}
          style={{ opacity: hidden ? 0.15 : busy ? 0.5 : 1 }}
          className="cursor-grab active:cursor-grabbing">
       <TaskChipContent task={task} />
@@ -311,16 +361,83 @@ function TaskChipContent({ task, overlay }: { task: Task; overlay?: boolean }) {
   )
 }
 
-/** 6 AM–10 PM is the OUTER bound, not a fixed range shown regardless of what's
+/** Click-to-edit popup — the alternative to dragging. A drag only ever
+ *  changes the TIME (see the module doc comment); this is the one place in
+ *  edit mode a task can move to a different DAY too. Plain `<input>`
+ *  date/time fields, seeded from the task's own `due_at` split into its date
+ *  and HH:MM parts (never through a `Date` object — this file's due_at is
+ *  IST-naive, and `new Date(...)` on it would reinterpret in the browser's
+ *  own timezone). No min/max/step on the time field, matching Today's own
+ *  free-entry time box elsewhere in this app. */
+function EditTimePopup({ task, day, busy, onCancel, onSave }: {
+  task: Task; day: string; busy: boolean
+  onCancel: () => void
+  onSave: (dueAt: string) => void
+}) {
+  const [date, setDate] = useState(task.due_at ? task.due_at.slice(0, 10) : day)
+  const [time, setTime] = useState(task.due_at ? task.due_at.slice(11, 16) : '09:00')
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+         style={{ background: 'rgba(0,0,0,.4)' }}
+         onClick={onCancel}>
+      <div className="w-full max-w-xs rounded-2xl border p-4"
+           style={{ borderColor: 'var(--border)', background: 'var(--bg-elevated)' }}
+           onClick={e => e.stopPropagation()}>
+        <div className="mb-3 flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="truncate text-[14px] font-semibold leading-snug">{task.title}</div>
+            <div className="text-[12px]" style={{ color: 'var(--text-subtle)' }}>Reschedule</div>
+          </div>
+          <button type="button" onClick={onCancel} className="shrink-0 rounded-md p-1"
+                  style={{ color: 'var(--text-subtle)' }}>
+            <X className="size-4" />
+          </button>
+        </div>
+        <div className="space-y-2.5">
+          <label className="block">
+            <span className="mb-1 block text-[11.5px] font-semibold uppercase tracking-wider"
+                  style={{ color: 'var(--text-subtle)' }}>Date</span>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)}
+                   className="w-full rounded-lg border px-2.5 py-2 text-[13.5px]"
+                   style={{ borderColor: 'var(--border)', background: 'var(--bg-sunken)' }} />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[11.5px] font-semibold uppercase tracking-wider"
+                  style={{ color: 'var(--text-subtle)' }}>Time</span>
+            <input type="time" value={time} onChange={e => setTime(e.target.value)}
+                   className="w-full rounded-lg border px-2.5 py-2 text-[13.5px]"
+                   style={{ borderColor: 'var(--border)', background: 'var(--bg-sunken)' }} />
+          </label>
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" onClick={onCancel}
+                  className="rounded-lg border px-3 py-1.5 text-[13px] font-medium"
+                  style={{ borderColor: 'var(--border)' }}>
+            Cancel
+          </button>
+          <button type="button" disabled={busy || !date || !time}
+                  onClick={() => onSave(`${date}T${time}:00`)}
+                  className="rounded-lg px-3 py-1.5 text-[13px] font-semibold text-white disabled:opacity-50"
+                  style={{ background: 'var(--accent)' }}>
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** 6 AM–11 PM is the OUTER bound, not a fixed range shown regardless of what's
  *  on the day — the grid still trims LEADING empty rows when the first task
  *  starts later than 6 AM (first task at 10 AM ⇒ the grid starts at 10 AM, not
- *  32 rows of nothing), and it EXTENDS past 10 PM rather than clip a genuine
+ *  32 rows of nothing), and it EXTENDS past 11 PM rather than clip a genuine
  *  late task — real data is never dropped to keep the window tidy. So the
  *  actual rule is: start at the LATER of 6 AM and the first task's slot; end
- *  at the LATER of 10 PM and the last task's slot. */
+ *  at the LATER of 11 PM and the last task's slot. */
 function buildSlots(tasks: Task[], slotOf: (t: Task) => string | null) {
   const DAY_START = 6 * 60   // 6:00 AM
-  const DAY_END = 22 * 60    // 10:00 PM
+  const DAY_END = 23 * 60    // 11:00 PM
 
   const withSlot = tasks
     .map(t => ({ task: t, slot: slotOf(t) }))
