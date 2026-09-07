@@ -11,7 +11,7 @@ import { TaskCard } from '../tasks/TaskCard'
 import { useTaskActions } from '../tasks/useTaskActions'
 import { TaskDetail } from '../tasks/TaskDetail'
 import { useUnreadComments } from '../tasks/useUnreadComments'
-import { NewTaskSheet, defaultTime } from '../tasks/NewTaskSheet'
+import { NewTaskSheet } from '../tasks/NewTaskSheet'
 import { MeetingDetail } from '../calendar/MeetingDetail'
 import {
   Button, Card, EmptyState, ErrorState, SectionHeading, Skeleton, cx,
@@ -67,13 +67,14 @@ export function TodayScreen() {
    *  Thursday that files new work under today would be quietly wrong. */
   const [day, setDay] = useState<string>(() => istDateKey(istNow()))
   const isTodayPicked = day === istDateKey(istNow())
-  /** The time box beside the day picker. Starts on the same safe "next half-hour"
-   *  default the task form itself uses (never literal now — a task due THIS
-   *  instant is born overdue) but is only actually PASSED to the form once the
-   *  user has touched it: an untouched default is not a choice, and a task created
-   *  from an untouched box should get the form's own normal default, not silently
+  /** The time box beside the day picker. Starts on the EXACT current time — this
+   *  is a "preselect what I'm looking at right now" control, not the task form's
+   *  own due-time field, so it carries none of that field's overdue-safety
+   *  rounding. It is only actually PASSED to the form once the user has touched
+   *  it: an untouched default is not a choice, and a task created from an
+   *  untouched box should get the form's own normal default, not silently
    *  inherit a time nobody picked. */
-  const [time, setTime] = useState<string>(defaultTime)
+  const [time, setTime] = useState<string>(currentTime)
   const [timePicked, setTimePicked] = useState(false)
 
   const allTasks = useMemo(() => t.data?.tasks ?? [], [t.data])
@@ -242,20 +243,21 @@ export function TodayScreen() {
               </button>
             )}
             {/* ── TIME BOX ──────────────────────────────────────────────
-                Shown preselected at the next round half-hour (never literal "now" —
-                see defaultTime), only nudgeable up to an hour ahead. It does nothing
-                on its own; it exists so "New task" a moment later can open already
-                pointed at the moment you were just looking at, instead of asking you
-                to re-enter a time you basically just told this screen. */}
+                Shown preselected at the EXACT current time, nudgeable up to 30
+                minutes ahead — a short, literal "now to soon" window rather than
+                the task form's own rounded default. It does nothing on its own;
+                it exists so "New task" a moment later can open already pointed at
+                the moment you were just looking at, instead of asking you to
+                re-enter a time you basically just told this screen. */}
             <input type="time" value={time}
-                   min={defaultTime()} max={addMinutes(defaultTime(), 60)}
+                   min={currentTime()} max={addMinutes(currentTime(), 30)}
                    onChange={e => { setTime(e.target.value || time); setTimePicked(true) }}
                    aria-label="Preselect a time for a new task"
                    className="rounded-lg border px-2.5 py-1.5 text-[13px]"
                    style={{ background: 'var(--bg)', borderColor: 'var(--border)',
                             color: 'var(--text)' }} />
             {timePicked && (
-              <button type="button" onClick={() => { setTime(defaultTime()); setTimePicked(false) }}
+              <button type="button" onClick={() => { setTime(currentTime()); setTimePicked(false) }}
                       className="rounded-lg px-2.5 py-1.5 text-[12.5px] font-semibold"
                       style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
                 Clear time
@@ -410,6 +412,7 @@ export function TodayScreen() {
       {creating && (
 
         <NewTaskSheet seedDate={day} seedTime={timePicked ? time : null}
+                      personalWhenSelf
                       onClose={() => setCreating(false)}
 
                       onCreated={() => { setCreating(false); t.reload() }} />
@@ -433,11 +436,22 @@ export function TodayScreen() {
 }
 
 /** "HH:MM" + minutes, wrapping past midnight. Used only to cap the Today time
- *  box an hour ahead of its default — plain string arithmetic, no Date needed. */
+ *  box 30 minutes ahead of "now" — plain string arithmetic, no Date needed. */
 function addMinutes(hhmm: string, minutes: number): string {
   const [h, m] = hhmm.split(':').map(Number)
   const total = (h * 60 + m + minutes + 1440) % 1440
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+}
+
+/** The EXACT current time, IST, unrounded — deliberately not `defaultTime()`
+ *  from NewTaskSheet, which rounds up to the next half-hour to keep a freshly
+ *  created task from being born overdue. This box is not writing a due_at by
+ *  itself; it is a short "now, or a little from now" window for what the NEXT
+ *  task should be preselected to. */
+function currentTime(): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata',
+  }).format(new Date())
 }
 
 /**
