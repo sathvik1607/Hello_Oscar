@@ -216,9 +216,9 @@ export const tasks = {
      *  `GET /teams/{id}/tasks?project=true`, i.e. from My Team — which is the whole
      *  point of the distinction. */
     is_project?: boolean
-  }) => request<Task>('/items', {
+  }) => request<{ ok: boolean; task: Task }>('/items', {
     method: 'POST', body: { ...body, user_id: requireUserId(), item_type: 'task' },
-  }),
+  }).then(r => r.task),
 
   /** Route through the dedicated complete endpoint, never PATCH /items with
    *  status=completed. That path setattrs the field and skips completed_at, the
@@ -261,6 +261,14 @@ export const tasks = {
   comments: (taskId: number, signal?: AbortSignal) =>
     request<{ task_id: number; comments: TaskComment[] }>(
       `/users/${requireUserId()}/tasks/${taskId}/comments`, { signal }),
+
+  /** Files on the TASK ITSELF — the description's own attachments, distinct
+   *  from whatever is attached to individual comments. Same table, same
+   *  access gate as `comments` above; these rows just never got re-parented
+   *  onto a comment via attach(). */
+  attachments: (taskId: number, signal?: AbortSignal) =>
+    request<{ task_id: number; attachments: CommentAttachment[] }>(
+      `/users/${requireUserId()}/tasks/${taskId}/attachments`, { signal }),
 
   /** Multipart, so it bypasses request(): setting Content-Type by hand on a
    *  FormData body strips the boundary and the server sees a malformed part.

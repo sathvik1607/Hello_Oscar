@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
-  Calendar, Check, ChevronDown, Clock, Pencil, Trash2, User, UserCheck, Users, X,
+  Calendar, Check, ChevronDown, Clock, Paperclip, Pencil, Trash2, User, UserCheck,
+  Users, X,
 } from 'lucide-react'
 import { ApiError, tasks as tasksApi } from '../../lib/api'
+import { useApi } from '../../lib/useApi'
 import { getUser } from '../../lib/session'
 import { dueLabel, messageTime, parseIstNaive, relative, isReallyOverdue } from '../../lib/format'
-import type { Task } from '../../lib/types'
+import type { CommentAttachment, Task } from '../../lib/types'
 import { CommentComposer, CommentList, useCommentThread } from './CommentThread'
+import { AttachmentChip } from './AttachmentChip'
 import { NewTaskSheet } from './NewTaskSheet'
 import {
   Badge, Button, IconButton, Portal, STATUS_LABEL, cx, Linkify} from '../../ui'
@@ -69,6 +72,13 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
   // One hook, two placements: the list scrolls with the sheet body, the composer
   // is pinned by the sheet's flex column so it is always at the bottom.
   const thread = useCommentThread(task.id, onChanged)
+
+  /** Files on the TASK ITSELF, not on any one comment — the description's own
+   *  attachments. READ-ONLY here on purpose: this view is otherwise entirely
+   *  read-only (Title/Date/Priority/Assignee all need Edit to change), and
+   *  adding a new one lives inside NewTaskSheet's own edit form now, not
+   *  here — see that component's paperclip-in-the-description-box control. */
+  const files = useApi(s => tasksApi.attachments(task.id, s), [task.id])
 
   const due = parseIstNaive(task.due_at)
   const done = task.status === 'completed'
@@ -179,6 +189,43 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
         {/* A flex COLUMN, so the comments block below can push itself to the bottom
             when the thread is short — see the mt-auto on it. */}
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-4">
+          {/* ── actions ─────────────────────────────────────────────── */}
+          {/* FIRST, right under the header — not down by Comments. These are
+              the three things you actually DO with a task, and they used to
+              sit below Description/Files/Details, which on a task with a
+              real description or attachments pushed them off the first
+              screen entirely: you had to scroll past everything just to
+              reach Mark complete. */}
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <Button variant={done ? 'secondary' : 'primary'} size="sm"
+                    loading={busyAction} onClick={() => void toggleComplete()}>
+              <Check className="size-3.5" /> {done ? 'Reopen' : 'Mark complete'}
+            </Button>
+            {!confirmDelete && (
+              <Button size="sm" variant="secondary"
+                      onClick={() => { onEditStart?.(); setEditing(true) }}>
+                <Pencil className="size-3.5" /> Edit
+              </Button>
+            )}
+            {confirmDelete ? (
+              <>
+                <Button size="sm" variant="danger" onClick={() => void remove()}>
+                  Cancel it
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>
+                  Keep
+                </Button>
+              </>
+            ) : (
+              <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(true)}>
+                {/* "Cancel", not "Delete": this is a SOFT delete — the row survives
+                    with status='cancelled' and still shows on the Calendar. Calling
+                    it Delete promises destruction the backend does not perform. */}
+                <Trash2 className="size-3.5" /> Cancel task
+              </Button>
+            )}
+          </div>
+
           {/* ── description ─────────────────────────────────────────── */}
           {/* HEADING AND BODY TOGETHER, or neither.
               The heading used to sit outside this conditional, so a task with no
@@ -197,6 +244,30 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
                 <Linkify text={task.description} />
               </p>
             </>
+          )}
+
+          {/* ── files on the task itself ────────────────────────────── */}
+          {/* Same shape as HEADING-AND-BODY-TOGETHER above: nothing renders
+              while there is nothing to show, so a task with no files looks
+              exactly like it did before this existed.
+              READ-ONLY — no "Attach a file" control here. This whole view is
+              otherwise read-only (Title/Date/Priority/Assignee all need Edit
+              to change), and adding a file lives exclusively inside the Edit
+              sheet now — see NewTaskSheet's paperclip-in-the-description-box
+              control, which also lists these same existing files. */}
+          {!!files.data?.attachments.length && (
+            <div className={cx(!!task.description?.trim() && 'mt-3.5')}>
+              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold
+                              uppercase tracking-[.1em]"
+                   style={{ color: 'var(--text-subtle)' }}>
+                <Paperclip className="size-3" /> Files
+              </div>
+              <div className="space-y-1.5">
+                {files.data.attachments.map((f: CommentAttachment) => (
+                  <AttachmentChip key={f.id} attachment={f} />
+                ))}
+              </div>
+            </div>
           )}
 
           {/* ── details, open by default ────────────────────────────── */}
@@ -263,37 +334,6 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
               </div>
             </div>
           )}
-
-          {/* ── actions ─────────────────────────────────────────────── */}
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <Button variant={done ? 'secondary' : 'primary'} size="sm"
-                    loading={busyAction} onClick={() => void toggleComplete()}>
-              <Check className="size-3.5" /> {done ? 'Reopen' : 'Mark complete'}
-            </Button>
-            {!confirmDelete && (
-              <Button size="sm" variant="secondary"
-                      onClick={() => { onEditStart?.(); setEditing(true) }}>
-                <Pencil className="size-3.5" /> Edit
-              </Button>
-            )}
-            {confirmDelete ? (
-              <>
-                <Button size="sm" variant="danger" onClick={() => void remove()}>
-                  Cancel it
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>
-                  Keep
-                </Button>
-              </>
-            ) : (
-              <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(true)}>
-                {/* "Cancel", not "Delete": this is a SOFT delete — the row survives
-                    with status='cancelled' and still shows on the Calendar. Calling
-                    it Delete promises destruction the backend does not perform. */}
-                <Trash2 className="size-3.5" /> Cancel task
-              </Button>
-            )}
-          </div>
 
           {editing && (
             <NewTaskSheet

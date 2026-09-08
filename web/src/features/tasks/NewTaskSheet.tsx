@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { Users, X } from 'lucide-react'
+import { Paperclip, Users, X } from 'lucide-react'
 import { ApiError, tasks as tasksApi, team as teamApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { getUser } from '../../lib/session'
 import { istDateKey, istNow } from '../../lib/format'
 import { Button, Field, IconButton, Portal, cx, inputCls, inputStyle } from '../../ui'
-import type { Task } from '../../lib/types'
+import { ACCEPTED, AttachmentChip, MAX_BYTES } from './AttachmentChip'
+import type { CommentAttachment, Task } from '../../lib/types'
 
 /**
  * Create OR EDIT a task by hand.
@@ -60,14 +61,13 @@ export function NewTaskSheet({
    */
   everyone?: number[] | null
   /**
-   * 🔴 TODAY ONLY — a self-assigned task created here is PERSONAL (`is_project:
-   * false`), not the usual "every new task is a team task" default. Today is where
-   * you jot down your own next thing, not where you publish to the team board, and
-   * the two screens disagreeing on this is deliberate: My Team is never opened to
-   * create work for yourself in the first place, so it keeps the old default
-   * unconditionally. Has no effect once `delegated` is true (self-assigned is the
-   * only case this changes) or while editing (an existing task keeps its own
-   * value, same as `isProject` below).
+   * 🔴 TODAY ONLY — a self-assigned task is PERSONAL (`is_project: false`) here,
+   * not the usual "every task is a team task" default. Today is where you jot down
+   * your own next thing, not where you publish to the team board — My Team never
+   * passes this, on create OR edit, so self-assigning from there (including
+   * re-confirming yourself as assignee on an existing task opened from My Team)
+   * always promotes it to a team task. Has no effect once `delegated` is true
+   * (self-assigned is the only case this changes).
    */
   personalWhenSelf?: boolean
 }) {
@@ -129,17 +129,17 @@ export function NewTaskSheet({
    * A project (team) task by default. The form no longer offers the choice — see
    * the "Team task" row below — so this is a derived constant rather than state.
    *
-   * 🔴 EDITING KEEPS THE TASK'S OWN VALUE. A personal task created before this
-   * change, or by Flutter (which still has the switch), must not be silently
-   * published to the team board just because someone fixed its title here.
-   *
-   * A NEW task defaults to true UNLESS `personalWhenSelf` opted in (Today) and
-   * this particular new task is self-assigned — see that prop's own comment for
-   * why My Team never takes this branch.
+   * SAME RULE ON CREATE AND EDIT: true unless `personalWhenSelf` opted in (Today)
+   * and the task is (still) self-assigned. Editing used to just keep the task's
+   * OWN stored value unconditionally — so a task born personal (self-assigned via
+   * Today) stayed personal forever, even after re-confirming yourself as assignee
+   * from My Team's edit sheet, which reads as "this never became a team task no
+   * matter what I do here." Re-deriving it the same way a new task would means
+   * self-assigning from anywhere OTHER than Today (which is the only screen that
+   * ever passes `personalWhenSelf`) promotes it to a team task, same as creating
+   * a fresh one would.
    */
-  const isProject = task
-    ? (task.is_project !== 0 && task.is_project !== false)
-    : !(personalWhenSelf && !delegated)
+  const isProject = !(personalWhenSelf && !delegated)
   const [title, setTitle] = useState(task?.title ?? '')
   const [date, setDate] = useState(seededDate ?? istDateKey(istNow()))
   const [time, setTime] = useState(seededTime ?? defaultTime())
@@ -161,6 +161,33 @@ export function NewTaskSheet({
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const titleRef = useRef<HTMLInputElement>(null)
+  /**
+   * Files picked here, not yet uploaded — plain `File` objects. Whether
+   * creating or editing, `pa_task_attachments.item_id` must be a REAL id, and
+   * on create that id does not exist until `tasksApi.create()` returns; on
+   * edit the id already exists, but uploading is still deferred to submit
+   * rather than fired the instant a file is picked, so "Cancel" on the sheet
+   * genuinely cancels — a file that uploaded on pick would already be
+   * attached to the task even if the rest of the edit was abandoned.
+   */
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const fileInput = useRef<HTMLInputElement>(null)
+  const pickFiles = (list: FileList | null) => {
+    const picked = list ? [...list] : []
+    for (const f of picked) {
+      if (f.size > MAX_BYTES) { setErr(`${f.name} is larger than 25 MB.`); continue }
+      setPendingFiles(prev => [...prev, f])
+    }
+  }
+
+  /** Files ALREADY on the task — only meaningful while editing (a new task
+   *  has no id to have any yet). Same read this task's own Files section in
+   *  TaskDetail uses; shown here too so an edit isn't blind to what's already
+   *  attached. No remove control: the backend has no delete-attachment route
+   *  yet, so offering one here would be a button that silently does nothing. */
+  const existingFiles = useApi(
+    s => task ? tasksApi.attachments(task.id, s) : Promise.resolve(null),
+    [task?.id])
 
   useEffect(() => { titleRef.current?.focus() }, [])
   useEffect(() => {
@@ -199,12 +226,19 @@ export function NewTaskSheet({
         await tasksApi.update(task.id, {
           title: t, due_at, priority, is_all_day: isAnytime,
           description: description.trim(),
+          // 🔴 SENT NOW, WHERE IT USED TO BE OMITTED ENTIRELY. `isProject` is
+          // re-derived above rather than frozen at the task's stored value, so an
+          // edit really can change it (self-assigning from outside Today promotes
+          // a personal task to a team one) — and none of that takes effect unless
+          // the PATCH actually carries the field.
+          is_project: delegated ? true : isProject,
           // 🔴 Singular, not the list. PATCH /items {assigned_to_user_id} is the
           // path that reconciles pa_item_assignees through set_assignees — sending
           // the plural here would move the legacy column and leave the roster
           // stale, which is the documented "reassignment did nothing" bug.
           ...(assignee != null ? { assigned_to_user_id: assignee } : {}),
         })
+        await uploadPending(task.id)
       } else {
         const base = {
           title: t,
@@ -226,15 +260,20 @@ export function NewTaskSheet({
           // a lead who asked for "everyone" needs to know if only six of nine
           // actually got a task, not a generic success toast.
           for (const id of everyone) {
-            await tasksApi.create({ ...base, assigned_to_user_id: id })
+            const created = await tasksApi.create({ ...base, assigned_to_user_id: id })
+            // Every copy gets the same file(s) — there is one set of pending
+            // files and N tasks, and there is no sensible way to split them
+            // per recipient.
+            await uploadPending(created.id)
           }
         } else {
-          await tasksApi.create({
+          const created = await tasksApi.create({
             ...base,
             // Omitted when unset so the backend's own self-assign default applies,
             // rather than this client deciding what "nobody" means.
             ...(assignee != null ? { assigned_to_user_id: assignee } : {}),
           })
+          await uploadPending(created.id)
         }
       }
       onCreated()
@@ -244,13 +283,37 @@ export function NewTaskSheet({
     }
   }
 
+  /**
+   * A picked file has no task to belong to until THIS moment — `create()`/
+   * `update()` above has just resolved, so `itemId` is finally real.
+   * Sequential, not parallel, matching the "everyone" create loop's own
+   * reasoning: each is a genuine write, and a failure here should be visible
+   * rather than swallowed by Promise.all. A file that fails to attach does
+   * NOT roll back the task itself — the task was the primary intent, and it
+   * already exists; the error surfaces so the user knows to retry the
+   * attachment from Task Detail instead of wondering where the task went.
+   */
+  async function uploadPending(itemId: number) {
+    for (const f of pendingFiles) {
+      await tasksApi.uploadAttachment(itemId, f)
+    }
+  }
+
   return (
     <Portal>
       <button aria-label="Close" onClick={onClose}
               className="fade fixed inset-0 z-[70] bg-black/30" />
       <div
         role="dialog" aria-modal="true" aria-label={editing ? 'Edit task' : 'New task'}
-        className="rise fixed inset-x-0 bottom-0 z-[71] rounded-t-3xl border-t p-4
+        /* 🔴 max-h + overflow-y-auto, NOT h-fit alone. The form grew past a
+           phone's viewport height the moment existing/pending FILES joined
+           title/description/date/priority/assignee — `h-fit` sizes the box to
+           its content with nothing to scroll it, so anything past the fold
+           was simply unreachable, not merely hidden. `max-h-[90vh]` caps the
+           box itself and `overflow-y-auto` scrolls whatever is left over,
+           on both the mobile bottom-sheet layout and the desktop centred one. */
+        className="rise fixed inset-x-0 bottom-0 z-[71] max-h-[90vh] overflow-y-auto
+                   rounded-t-3xl border-t p-4
                    sm:inset-0 sm:m-auto sm:h-fit sm:max-w-md sm:rounded-2xl sm:border"
         style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border)',
                  paddingBottom: 'calc(env(safe-area-inset-bottom) + 20px)' }}
@@ -279,14 +342,71 @@ export function NewTaskSheet({
               the label already says better. Date/priority/assignee keep their order
               after it: what the task IS, then when and who. */}
           <Field label="Description">
-            <textarea value={description} onChange={e => setDescription(e.target.value)}
-                      /* 2 rows, not 3. It is optional and usually a line — an
-                         empty box the height of three cost more than it gave, and
-                         it grows on focus below. */
-                      rows={2} placeholder="Add details (optional)"
-                      className={cx(inputCls, 'resize-none leading-relaxed')}
-                      style={inputStyle} />
+            {/* `relative` here, not on Field itself — the paperclip is
+                positioned against the TEXTAREA's own box, and Field is a
+                shared component used by fields that have no such overlay. */}
+            <div className="relative">
+              <textarea value={description} onChange={e => setDescription(e.target.value)}
+                        /* 2 rows, not 3. It is optional and usually a line — an
+                           empty box the height of three cost more than it gave, and
+                           it grows on focus below. Right padding clears the
+                           paperclip so typed text never runs under it. */
+                        rows={2} placeholder="Add details (optional)"
+                        className={cx(inputCls, 'resize-none pr-9 leading-relaxed')}
+                        style={inputStyle} />
+              <input ref={fileInput} type="file" multiple accept={ACCEPTED}
+                     className="hidden"
+                     onChange={e => { pickFiles(e.target.files); e.target.value = '' }} />
+              <button type="button" onClick={() => fileInput.current?.click()}
+                      aria-label="Attach a file"
+                      title="Attach a file (25 MB max)"
+                      className="absolute right-2 top-2 grid size-6 place-items-center rounded-md"
+                      style={{ color: 'var(--text-subtle)' }}>
+                <Paperclip className="size-4" />
+              </button>
+            </div>
           </Field>
+
+          {/* Already on the task — EDIT only, since a new task has no id yet
+              to have any. Same AttachmentChip Task Detail uses, so a file
+              here opens the same in-app viewer; no remove control until the
+              backend has a delete-attachment route. */}
+          {!!existingFiles.data?.attachments.length && (
+            <div className="space-y-1.5">
+              {existingFiles.data.attachments.map((f: CommentAttachment) => (
+                <AttachmentChip key={f.id} attachment={f} />
+              ))}
+            </div>
+          )}
+
+          {/* Picked here, uploaded once submit has a real task id to attach
+              them to — see `pendingFiles`/`uploadPending`. Not `PendingChip`:
+              that component's copy and spinner both say "uploading now",
+              which would be a lie here — nothing uploads until submit, this
+              is just "will be attached", with a way to change your mind
+              before it does. */}
+          {pendingFiles.length > 0 && (
+            <div className="space-y-1.5">
+              {pendingFiles.map((f, i) => (
+                <div key={`${f.name}-${i}`}
+                     className="flex items-center gap-2.5 rounded-xl border p-2"
+                     style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border)' }}>
+                  <span className="grid size-8 shrink-0 place-items-center rounded-lg"
+                        style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+                    <Paperclip className="size-3.5" />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{f.name}</span>
+                  <button type="button"
+                          onClick={() => setPendingFiles(prev => prev.filter((_, j) => j !== i))}
+                          aria-label={`Remove ${f.name}`}
+                          className="grid size-6 shrink-0 place-items-center rounded-md"
+                          style={{ color: 'var(--text-subtle)' }}>
+                    <X className="size-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* 🔴 NO TIME FIELD ON A NORMAL TASK. Priority here is scheduler
               BEHAVIOUR, not a label: `critical` gets exactly one reminder at T-15
@@ -430,23 +550,26 @@ export function NewTaskSheet({
               Today is exactly the case that needs the confirmation, since a
               self-assigned task there is personal (see `personalWhenSelf`) and
               a silent row would leave "did picking them just make this a team
-              task?" unanswered. Only hidden while editing — an existing task's
-              own is_project is not something this row should be restating as
-              if it were a fresh decision. */}
-          {!task && (
-            <div className="flex w-full items-center gap-2.5 rounded-xl border px-3 py-2"
-                 style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}>
-              <Users className="size-4 shrink-0" style={{ color: 'var(--text-subtle)' }} />
-              <span className="min-w-0 flex-1">
-                <span className="block text-[13.5px] font-medium">
-                  {delegated || isProject ? 'Team task' : 'Personal task'}
-                </span>
-                <span className="block text-[12px]" style={{ color: 'var(--text-subtle)' }}>
-                  {delegated || isProject ? 'Shared with your team' : 'Only visible to you'}
-                </span>
+              task?" unanswered.
+              SHOWN WHILE EDITING TOO, not just on create — `isProject` is now
+              re-derived on every edit rather than frozen at the task's original
+              value (see `isProject` above), so an edit CAN flip it, and hiding
+              the row would make that flip invisible right when it matters most:
+              re-confirming yourself as assignee on a task that started out
+              personal is exactly the moment you need to see it just became a
+              team task. */}
+          <div className="flex w-full items-center gap-2.5 rounded-xl border px-3 py-2"
+               style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}>
+            <Users className="size-4 shrink-0" style={{ color: 'var(--text-subtle)' }} />
+            <span className="min-w-0 flex-1">
+              <span className="block text-[13.5px] font-medium">
+                {delegated || isProject ? 'Team task' : 'Personal task'}
               </span>
-            </div>
-          )}
+              <span className="block text-[12px]" style={{ color: 'var(--text-subtle)' }}>
+                {delegated || isProject ? 'Shared with your team' : 'Only visible to you'}
+              </span>
+            </span>
+          </div>
 
           {err && <p className="text-[13px]" style={{ color: '#DC2626' }}>{err}</p>}
 
