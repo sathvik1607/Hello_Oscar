@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { CalendarClock, Flame, CheckCircle2, Clock, Pencil, Plus } from 'lucide-react'
-import { meetings as meetingsApi, tasks as tasksApi } from '../../lib/api'
+import { meetings as meetingsApi, tasks as tasksApi, team as teamApi } from '../../lib/api'
+import { getUser } from '../../lib/session'
 import { useApi } from '../../lib/useApi'
 import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
 import {
@@ -34,6 +35,20 @@ import {
  * ignored.
  */
 export function TodayScreen() {
+  const me = getUser()
+  const isTeamLead = me?.role === 'team_lead'
+  /** Same "Everyone" chip My Team's own create flow offers a lead — this used
+   *  to be My-Team-only, so a lead broadcasting a task had to leave Today
+   *  first even though Today is where they were already jotting it down.
+   *  `Promise.resolve([])` when there's no team, matching every other
+   *  team-gated fetch in this screen family. */
+  const members = useApi(
+    s => isTeamLead && me?.team_id ? teamApi.members(me.team_id, s) : Promise.resolve([]),
+    [isTeamLead, me?.team_id])
+  const everyoneElse = (members.data ?? [])
+    .filter(mem => mem.user_id !== me?.id)
+    .map(mem => mem.user_id)
+
   const [openTask, setOpenTask] = useState<Task | null>(null)
   // Unread comments per task — the badge and the glow on each card, and the
   // clear when one is opened. See useUnreadComments: derived from the bell rows
@@ -449,6 +464,7 @@ export function TodayScreen() {
 
         <NewTaskSheet seedDate={day} seedTime={timePicked ? time : null}
                       personalWhenSelf
+                      everyone={isTeamLead && everyoneElse.length ? everyoneElse : null}
                       onClose={() => setCreating(false)}
 
                       onCreated={() => { setCreating(false); t.reload() }} />
