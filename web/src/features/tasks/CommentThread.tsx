@@ -34,12 +34,37 @@ import {
  * One hook so both halves share the staging, the in-flight guard and the errors —
  * two copies of that would drift.
  */
+/** sessionStorage key for an in-progress, unsent draft on one item's thread —
+ *  survives closing and reopening the sheet, switching to a different task and
+ *  back, and a full page reload, all within the same tab. Cleared the moment
+ *  the draft is actually posted, so a sent comment never "comes back" the next
+ *  time the thread opens. */
+const draftKey = (itemId: number) => `oscar.comment-draft.${itemId}`
+
 export function useCommentThread(itemId: number, onPosted?: () => void) {
   const me = getUser()
   const c = useApi(s => tasksApi.comments(itemId, s), [itemId])
   const reload = c.reload
 
-  const [draft, setDraft] = useState('')
+  /**
+   * 🔴 THE DRAFT USED TO LIVE ONLY IN THIS HOOK'S OWN STATE — fine while the
+   * sheet stayed mounted, but closing a task's detail sheet (to look at
+   * another task, or just to back out) unmounts this hook entirely, and a
+   * half-typed note vanished with it. Nothing else in this app is that
+   * unforgiving about typed text. Seeding from sessionStorage on mount and
+   * writing back on every keystroke means the text is still there whenever
+   * the thread is reopened, in this tab, until it is actually sent.
+   */
+  const [draft, setDraftState] = useState(() => {
+    try { return sessionStorage.getItem(draftKey(itemId)) ?? '' } catch { return '' }
+  })
+  const setDraft = (v: string) => {
+    setDraftState(v)
+    try {
+      if (v) sessionStorage.setItem(draftKey(itemId), v)
+      else sessionStorage.removeItem(draftKey(itemId))
+    } catch { /* private browsing — draft just doesn't survive a reload */ }
+  }
   const [sending, setSending] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [staged, setStaged] = useState<CommentAttachment[]>([])

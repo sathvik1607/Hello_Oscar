@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   ExternalLink, FileSpreadsheet, FileText, File as FileIcon, Image as ImageIcon,
   Loader2, X,
@@ -6,6 +6,7 @@ import {
 import { ApiError, attachmentHref, thumbHref } from '../../lib/api'
 import { bytes } from '../../lib/format'
 import type { CommentAttachment } from '../../lib/types'
+import { Portal } from '../../ui'
 
 /**
  * A file on a comment. Mirrors the Flutter `AttachmentChip` and its entity rules,
@@ -32,65 +33,45 @@ export function AttachmentChip({ attachment: a, onRemove }: {
 }) {
   const [opening, setOpening] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [viewer, setViewer] = useState<{ href: string; revoke?: () => void } | null>(null)
   const preview = a.is_image || a.page_count ? thumbHref(a) : null
 
   /**
-   * A document keeps a NEW tab — the browser's own PDF/Office viewer lives in
-   * that tab's chrome, and embedding one (pdf.js is ~350 kB) to duplicate
-   * something every browser already ships would be the wrong trade. An image
-   * navigates the SAME tab instead; see openImage below for why.
+   * 🔴 AN IN-APP MODAL, NOT A NEW TAB OR A SAME-TAB NAVIGATION. Both of those
+   * were tried and both share the same real complaint: once you're looking at
+   * the file there is nothing TO close — a new tab has to be switched away
+   * from or manually closed, and a same-tab navigation only "closes" via the
+   * browser's own back button, which is not a control on the page at all. A
+   * modal with its own × puts a close action for THIS specific file right on
+   * the screen, and never leaves the comment thread underneath it.
+   *
+   * A PDF still gets a real in-app preview (the browser's native PDF renderer
+   * inside an iframe — no pdf.js needed); an image renders at native size,
+   * scrollable if it's taller than the viewer. Anything else (Office/CSV) has
+   * no reliable in-browser preview, so the modal still opens for it — same
+   * close button, same place — but its body is a single "Open in a new tab"
+   * action rather than an embedded preview.
    */
-  const openInTab = useCallback(async () => {
+  const open = useCallback(async () => {
     if (opening) return
     setOpening(true); setErr(null)
-    let revoke: (() => void) | undefined
     try {
       const r = await attachmentHref(a)
-      revoke = r.revoke
-      window.open(r.href, '_blank', 'noopener')
+      // The blob/direct URL (and its revoke, if any) is now owned by the
+      // modal, which revokes it on close — revoking here, before the modal
+      // has rendered it, would hand an <img>/<iframe> a URL that's already
+      // dead.
+      setViewer(r)
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'Could not open that file.')
     } finally {
       setOpening(false)
-      // A blob URL pins the whole file in memory until the document is discarded.
-      // Revoked on a delay because revoking before the new tab has read it yields
-      // a blank tab — 60s is far longer than a read and still bounded.
-      if (revoke) setTimeout(revoke, 60_000)
     }
   }, [a, opening])
 
-  /**
-   * 🔴 SAME TAB, AT THE IMAGE'S OWN NATIVE SIZE — not a modal that scales it to
-   * fit the viewport. A custom lightbox was tried here and it made a tall phone
-   * screenshot readable-but-tiny (shrunk to fit the screen whole) or, zoomed,
-   * lost the surrounding chrome; the browser's own image view already does this
-   * correctly for free — it renders the file at 1:1, and a tall image simply
-   * scrolls, exactly like opening the image URL directly. So this reuses THAT
-   * instead of reimplementing it.
-   */
-  const openImage = useCallback(async () => {
-    if (opening) return
-    setOpening(true); setErr(null)
-    let revoke: (() => void) | undefined
-    try {
-      // The FULL file, not the thumbnail. `thumbHref` is a 256px render — fine in the
-      // chip, unreadable blown up to the viewport.
-      const r = await attachmentHref(a)
-      revoke = r.revoke
-      // Same tab (no '_blank'): this is meant to read as "look at the image", not
-      // "leave the app in a new tab" — the back button returns to the thread.
-      window.location.assign(r.href)
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : 'Could not open that image.')
-    } finally {
-      setOpening(false)
-      // Revoking on a delay, same reasoning as openInTab: the navigation has not
-      // necessarily finished reading the blob the instant assign() returns.
-      if (revoke) setTimeout(revoke, 60_000)
-    }
-  }, [a, opening])
-
-  const open = a.is_image ? openImage : openInTab
+  const closeViewer = useCallback(() => {
+    setViewer(v => { v?.revoke?.(); return null })
+  }, [])
 
   // "4 pages · PDF · 719 KB" — each part dropped when unknown, so a backend that
   // reports no page count reads correctly instead of showing "null pages".
@@ -148,8 +129,9 @@ export function AttachmentChip({ attachment: a, onRemove }: {
                 {opening ? 'Opening…' : subtitle}
               </span>
             </span>
-            {/* Says where the tap goes BEFORE you take it — both kinds navigate
-                away now (same tab for an image, a new one for a document). */}
+            {/* A hint that tapping opens something, rather than promising a
+                specific destination — every kind now opens the same in-app
+                modal (see `open` above), closable without leaving the thread. */}
             {preview && (
               <span className="shrink-0" style={{ color: 'var(--text-subtle)' }}>
                 {opening ? <Loader2 className="size-4 animate-spin" />
@@ -167,7 +149,82 @@ export function AttachmentChip({ attachment: a, onRemove }: {
         </div>
       </div>
       {err && <p className="mt-1 px-1 text-[11px]" style={{ color: '#DC2626' }}>{err}</p>}
+      {viewer && <AttachmentViewer attachment={a} href={viewer.href} onClose={closeViewer} />}
     </div>
+  )
+}
+
+/**
+ * The in-app viewer — one modal shared by every kind of attachment, so there is
+ * always exactly one specific thing being looked at and exactly one close
+ * button for it. Rendered through `Portal` so it sits at the document root,
+ * above everything (a sheet, another modal, the thread's own scroll region)
+ * rather than being clipped or scrolled by whatever the chip happens to be
+ * inside.
+ */
+function AttachmentViewer({ attachment: a, href, onClose }: {
+  attachment: CommentAttachment; href: string; onClose: () => void
+}) {
+  // Esc closes it — the keyboard equivalent of the × for anyone not reaching
+  // for the mouse, and the behaviour every native viewer already has.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const isPdf = a.mime_type.includes('pdf')
+  // Neither an image nor a PDF has a reliable in-browser preview (Office/CSV
+  // formats render via whatever's installed locally, not the browser itself),
+  // so the modal still opens for these — same close button, same place — but
+  // its body is a single external-open action instead of an embedded preview.
+  const previewable = a.is_image || isPdf
+
+  return (
+    <Portal>
+      <div className="fixed inset-0 z-[80] flex flex-col"
+           style={{ background: 'rgba(0,0,0,.85)' }}>
+        <div className="flex items-center justify-between gap-3 p-3">
+          <span className="min-w-0 truncate text-[13px] font-medium text-white">
+            {a.file_name ?? 'Attachment'}
+          </span>
+          <button onClick={onClose} aria-label="Close"
+                  className="grid size-8 shrink-0 place-items-center rounded-full"
+                  style={{ background: 'rgba(255,255,255,.12)', color: '#fff' }}>
+            <X className="size-4" />
+          </button>
+        </div>
+        {/* The backdrop itself also closes — clicking outside the file is the
+            same gesture as the × on every viewer like this. The content area
+            below stops that click from bubbling, so tapping the image/PDF
+            itself does not close it. */}
+        <button aria-label="Close" onClick={onClose}
+                className="absolute inset-0 -z-10 cursor-default" />
+        <div className="min-h-0 flex-1 overflow-auto p-3 pt-0"
+             onClick={e => e.stopPropagation()}>
+          {a.is_image && (
+            <img src={href} alt={a.file_name ?? ''}
+                 className="mx-auto block max-w-full" />
+          )}
+          {!a.is_image && isPdf && (
+            <iframe src={href} title={a.file_name ?? 'PDF'}
+                    className="h-full w-full rounded-lg border-0 bg-white" />
+          )}
+          {!previewable && (
+            <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+              <p className="text-[13px]" style={{ color: 'rgba(255,255,255,.75)' }}>
+                No preview for this file type.
+              </p>
+              <a href={href} target="_blank" rel="noopener noreferrer"
+                 className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium"
+                 style={{ background: 'rgba(255,255,255,.12)', color: '#fff' }}>
+                <ExternalLink className="size-3.5" /> Open in a new tab
+              </a>
+            </div>
+          )}
+        </div>
+      </div>
+    </Portal>
   )
 }
 
