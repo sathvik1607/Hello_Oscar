@@ -69,12 +69,10 @@ export function AppShell({ section, onNavigate, children }: {
         <div className="mb-6 flex items-center justify-between gap-2 px-2">
           <div className="flex items-center gap-2.5">
             <Logo />
-            <div className="min-w-0">
-              <div className="text-sm font-semibold leading-tight">Oscar</div>
-              <div className="truncate text-[11px]" style={{ color: 'var(--text-subtle)' }}>
-                {user?.team_name ?? 'Personal'}
-              </div>
-            </div>
+            {/* 🔴 NO WORKSPACE NAME HERE ANY MORE — it now shows in the top
+                header (right side, every screen), so repeating it here would
+                just be the same fact twice on the same page. */}
+            <div className="text-sm font-semibold leading-tight">Hello Oscar</div>
           </div>
           <button onClick={() => setRailOpen(false)} aria-label="Close navigation"
                   className="lg:hidden" style={{ color: 'var(--text-muted)' }}>
@@ -151,6 +149,19 @@ export function AppShell({ section, onNavigate, children }: {
               {meta.subtitle}
             </p>
           </div>
+          {/* 🔴 THE WORKSPACE, RIGHT HERE, ON EVERY SCREEN — this header is
+              shared by every section (it lives in AppShell, not per-page), so
+              adding it here is the one edit that makes it show up everywhere
+              at once, rather than repeating it in every screen's own header.
+              Hidden below sm: the title/subtitle already own that width on a
+              phone, and a truncated workspace name squeezed in beside them
+              would read worse than simply not being there. */}
+          {user?.team_name && (
+            <div className="hidden shrink-0 truncate text-base font-medium sm:block"
+                 style={{ color: 'var(--text-muted)' }}>
+              {user.team_name}
+            </div>
+          )}
           {/* Oscar is reachable from every screen, by design — an assistant behind
               a tab is an assistant nobody talks to. Hidden on the smallest widths,
               where the floating button below serves the same purpose without
