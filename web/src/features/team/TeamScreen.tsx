@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Circle, Plus, Users } from 'lucide-react'
-import { team as teamApi } from '../../lib/api'
+import { tasks as tasksApi, team as teamApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
 import { getUser, identityIsStale, signOutStaleIdentity } from '../../lib/session'
@@ -456,7 +456,8 @@ export function TeamScreen() {
 
       {openTask && (
         <TaskDetail task={openTask} onClose={() => setOpenTask(null)}
-                    onChanged={() => { projects.reload(); memberTasks.reload() }} />
+                    onChanged={() => { projects.reload(); memberTasks.reload() }}
+                    onOpenSubtask={id => { void tasksApi.single(id).then(setOpenTask) }} />
       )}
       {creating && (
         /* 🔴 THE PICKED MEMBER IS THE ASSIGNEE. The roster selection is the whole
@@ -477,9 +478,13 @@ export function TeamScreen() {
           seedDate={day}
           seedAssignee={selected ?? null}
           everyone={isTeamLead && selected === null ? everyoneElse : null}
+          // 🔴 STAYS OPEN AFTER EACH CREATE. Assigning several tasks to
+          // several different members used to mean reopening this sheet
+          // from scratch every time — see NewTaskSheet's own
+          // `keepOpenAfterCreate` for the reset-instead-of-close logic.
+          keepOpenAfterCreate
           onClose={() => setCreating(false)}
           onCreated={() => {
-            setCreating(false)
             projects.reload(); memberTasks.reload()
           }} />
       )}

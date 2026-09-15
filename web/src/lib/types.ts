@@ -84,6 +84,10 @@ export type Task = {
   parent_task_id?: number | null
   subtask_count?: number
   is_project?: boolean | number
+  /** A leadership-owned parent task. Only the owner can complete it — see
+   *  item_service.complete_item on the backend — even after every child task
+   *  under it is done. */
+  is_goal?: boolean
   risk_flag?: number
   item_type?: 'task' | 'meeting'
   /** "14 of 307 done" — the rollup the roster is capped to avoid shipping. */
@@ -103,6 +107,27 @@ export type Task = {
    *  stamped. A flag in the wild is historical only. */
   spilled_over?: boolean
   spilled_over_at?: string | null
+}
+
+/** GET /tasks/{id}/tree — the task rooted at id plus its full child tree,
+ *  recursively. A leaner shape than Task (no assignees roster, no comment/
+ *  attachment counts) since it exists to show "who's under this" and "what
+ *  is this task a child of", not to duplicate the detail screen. */
+export type TaskTreeNode = {
+  id: number
+  title: string
+  status: ItemStatus
+  priority: string | null
+  due_at: string | null
+  risk_flag: number
+  escalation_level: number
+  assigned_to_user_id: number | null
+  assigned_to_name: string | null
+  created_by_name: string | null
+  parent_task_id: number | null
+  root_task_id: number | null
+  subtask_count: number
+  children: TaskTreeNode[]
 }
 
 export type Meeting = {

@@ -27,11 +27,17 @@ import type { CommentAttachment, Task } from '../../lib/types'
  */
 export function NewTaskSheet({
   onClose, onCreated, task, seedDate, seedTime, seedAssignee, everyone, personalWhenSelf,
+  keepOpenAfterCreate, parentTask,
 }: {
   onClose: () => void
   onCreated: () => void
   /** Present = edit that task. Absent = create a new one. */
   task?: Task | null
+  /** Creating a SUB-TASK under this one — ignored while editing. Shown as a
+   *  fixed "Under: <title>" line rather than a picker; changing the parent
+   *  isn't offered because nothing else in the app supports moving a task
+   *  between parents once created. */
+  parentTask?: Task | null
   /** Who to pre-select, when the opening screen already has a person in view — My
    *  Team with a member picked. Same reasoning as `seedDate`: the filter you are
    *  looking at IS the intent, and making you re-pick it is a step that can only go
@@ -70,6 +76,16 @@ export function NewTaskSheet({
    * (self-assigned is the only case this changes).
    */
   personalWhenSelf?: boolean
+  /**
+   * MY TEAM'S OWN CREATE FLOW ONLY, and only on a genuine CREATE (never edit —
+   * see `editing` below, which this has no effect on). A lead assigning task
+   * after task to different people used to have the sheet close and reopen
+   * on every single one; this keeps it open, resets the form, and shows a
+   * brief "Task created" confirmation instead of closing — `onClose` is
+   * simply never called on this path, so the list behind it still reloads
+   * via `onCreated()` exactly as before.
+   */
+  keepOpenAfterCreate?: boolean
 }) {
   const editing = Boolean(task)
   // Seeded from the task when editing. `due_at` arrives IST-naive
@@ -158,8 +174,18 @@ export function NewTaskSheet({
   // representation — a null due_at is NOT (POST /items rejects it, and a dateless
   // task falls out of every date-grouped view including Today).
   const [description, setDescription] = useState(task?.description ?? '')
+  /** A leadership-owned parent task. Team-lead only, create only — a Goal isn't
+   *  something a task flips into or out of after the fact. The backend rejects
+   *  this (403) if the caller isn't the team lead, so the checkbox is hidden
+   *  for anyone else rather than letting them hit that error. */
+  const [isGoal, setIsGoal] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  /** "Task created" — shown briefly instead of closing, only when
+   *  `keepOpenAfterCreate` is in effect. Cleared the moment the title is
+   *  typed into again, so it never lingers as a stale confirmation for the
+   *  NEXT task being written. */
+  const [justCreated, setJustCreated] = useState(false)
   const titleRef = useRef<HTMLInputElement>(null)
   /**
    * Files picked here, not yet uploaded — plain `File` objects. Whether
@@ -250,6 +276,8 @@ export function NewTaskSheet({
           // team work by definition, and a personal task assigned to someone else
           // would be invisible to the lead who has to track it.
           is_project: delegated ? true : isProject,
+          ...(isGoal ? { is_goal: true } : {}),
+          ...(parentTask ? { parent_task_id: parentTask.id } : {}),
         }
         if (broadcasting && everyone?.length) {
           // 🔴 N SEPARATE CREATES, SEQUENTIAL — not one call with every id, and not
@@ -277,6 +305,24 @@ export function NewTaskSheet({
         }
       }
       onCreated()
+      // 🔴 EDIT NEVER TAKES THIS BRANCH — `!task` guards it, and the caller
+      // that wants this (My Team) never sets it while `task` is present in
+      // the first place (there's no such call site). Reset the form to a
+      // fresh create rather than closing: title/description/pendingFiles
+      // back to blank, date/priority back to their seeded defaults, and the
+      // assignee/broadcasting choice preserved — a lead assigning five
+      // different tasks to five different people re-picks the person each
+      // time anyway, but re-typing the date and re-toggling Normal/Critical
+      // for every single one would be the annoying part.
+      if (!task && keepOpenAfterCreate) {
+        setTitle('')
+        setDescription('')
+        setPendingFiles([])
+        setJustCreated(true)
+        setBusy(false)
+        titleRef.current?.focus()
+        return
+      }
     } catch (e2) {
       setErr(e2 instanceof ApiError ? e2.message : String(e2))
       setBusy(false)
@@ -319,9 +365,16 @@ export function NewTaskSheet({
                  paddingBottom: 'calc(env(safe-area-inset-bottom) + 20px)' }}
       >
         <div className="mb-3.5 flex items-center justify-between">
-          <h2 className="text-[15px] font-semibold">{editing ? 'Edit task' : 'New task'}</h2>
+          <h2 className="text-[15px] font-semibold">
+            {editing ? 'Edit task' : parentTask ? 'New sub-task' : 'New task'}
+          </h2>
           <IconButton label="Close" onClick={onClose}><X className="size-5" /></IconButton>
         </div>
+        {!editing && parentTask && (
+          <p className="mb-3 text-[12.5px]" style={{ color: 'var(--text-subtle)' }}>
+            Under: <span className="font-medium" style={{ color: 'var(--text)' }}>{parentTask.title}</span>
+          </p>
+        )}
 
         {/* space-y-3, not 4. Eight stacked fields multiply a gap: the sheet was
             taller than a phone viewport, so Create sat below the fold on the one
@@ -329,10 +382,21 @@ export function NewTaskSheet({
             the air between rows. */}
         <form onSubmit={submit} className="space-y-3">
           <Field label="Title">
-            <input ref={titleRef} value={title} onChange={e => setTitle(e.target.value)}
+            <input ref={titleRef} value={title}
+                   onChange={e => { setTitle(e.target.value); setJustCreated(false) }}
                    className={inputCls} style={inputStyle}
                    placeholder="What needs to be done?" />
           </Field>
+          {/* The confirmation for `keepOpenAfterCreate` — the sheet staying
+              open IS the visible proof of "still here", but "still here"
+              alone doesn't say whether the LAST one actually saved. Clears
+              itself the moment the next title is typed (above), so it never
+              reads as confirming a task that hasn't been created yet. */}
+          {justCreated && (
+            <p className="text-[12.5px] font-medium" style={{ color: '#15803D' }}>
+              ✓ Task created — assign the next one.
+            </p>
+          )}
 
           {/* SECOND, directly under Title. These are the two fields you TYPE; the
               rest are pickers you tap. Description used to sit last, below the
@@ -571,6 +635,25 @@ export function NewTaskSheet({
             </span>
           </div>
 
+          {/* Team-lead only, create only. Hidden for anyone else and while
+              editing rather than shown-and-disabled, since a Goal isn't
+              something a task flips into after the fact and a non-lead
+              would only ever see it 403. */}
+          {!editing && !parentTask && me?.role === 'team_lead' && (
+            <label className="flex w-full items-center gap-2.5 rounded-xl border px-3 py-2"
+                   style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}>
+              <input type="checkbox" checked={isGoal}
+                     onChange={e => setIsGoal(e.target.checked)}
+                     className="size-4 shrink-0" />
+              <span className="min-w-0 flex-1">
+                <span className="block text-[13.5px] font-medium">Mark as Goal</span>
+                <span className="block text-[12px]" style={{ color: 'var(--text-subtle)' }}>
+                  Only you can complete it, even after every child task is done
+                </span>
+              </span>
+            </label>
+          )}
+
           {err && <p className="text-[13px]" style={{ color: '#DC2626' }}>{err}</p>}
 
           <div className="flex gap-2 pt-1">
@@ -578,6 +661,7 @@ export function NewTaskSheet({
                     disabled={!title.trim()} className="flex-1">
               {editing ? 'Save changes'
                 : broadcasting ? `Create for everyone (${everyone?.length ?? 0})`
+                : parentTask ? 'Create sub-task'
                 : 'Create task'}
             </Button>
             <Button type="button" onClick={onClose}>Cancel</Button>

@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
-  Calendar, Check, ChevronDown, Clock, Paperclip, Pencil, Trash2, User, UserCheck,
-  Users, X,
+  Calendar, Check, ChevronDown, Clock, GitBranch, Paperclip, Pencil, Trash2, User,
+  UserCheck, Users, X,
 } from 'lucide-react'
 import { ApiError, tasks as tasksApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { getUser } from '../../lib/session'
 import { dueLabel, messageTime, parseIstNaive, relative, isReallyOverdue } from '../../lib/format'
-import type { CommentAttachment, Task } from '../../lib/types'
+import type { CommentAttachment, Task, TaskTreeNode } from '../../lib/types'
 import { CommentComposer, CommentList, useCommentThread } from './CommentThread'
 import { AttachmentChip } from './AttachmentChip'
 import { NewTaskSheet } from './NewTaskSheet'
@@ -36,10 +36,16 @@ import {
  * comment will reschedule the task, when it will not, is worse than not offering it.
  */
 export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
-                            focusThread }: {
+                            focusThread, onOpenSubtask }: {
   task: Task
   onClose: () => void
   onChanged: () => void
+  /** Open a DIFFERENT task by id, in this same detail view — a sub-task row or
+   *  the "Part of: X" line both need to switch to a task that ISN'T the one
+   *  this component was opened with. Absent ⇒ those rows render but are
+   *  inert (see the `disabled` on the sub-task button), rather than every
+   *  caller having to wire up navigation to use this component at all. */
+  onOpenSubtask?: (taskId: number) => void
   /** Fired the moment the edit form opens.
    *
    *  Exists for the VOICE panel: the microphone is open for the whole call, so
@@ -62,6 +68,7 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
   const [err, setErr] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [editing, setEditing] = useState(false)
+  const [addingSubtask, setAddingSubtask] = useState(false)
   // Open by default — matching mobile, where these are shown expanded. They
   // used to be secondary metadata (created/completed timestamps) worth
   // tucking away; now they carry who the task is FOR, which is core
@@ -79,6 +86,23 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
    *  adding a new one lives inside NewTaskSheet's own edit form now, not
    *  here — see that component's paperclip-in-the-description-box control. */
   const files = useApi(s => tasksApi.attachments(task.id, s), [task.id])
+
+  /** The tree rooted at THIS task — its own direct children, by name/status/
+   *  assignee. Only fetched when there is something to show; a leaf task with
+   *  no children and no parent skips the request entirely. Also the source
+   *  for "Part of: X" below: a child's OWN row (id, status, assignee) has no
+   *  reference to its parent's title, only `parent_task_id` (a number) — the
+   *  tree endpoint is what turns that id into a name to actually show. */
+  const hasFamily = !!task.subtask_count || !!task.parent_task_id
+  const tree = useApi(
+    s => hasFamily ? tasksApi.tree(task.id, s) : Promise.resolve(null),
+    [task.id, hasFamily])
+  /** The PARENT's own tree, fetched only to read its title for "Part of: X" —
+   *  `tree(task.id)` only walks DOWNWARD from this task, never up. Skipped
+   *  entirely for a task with no parent. */
+  const parentTree = useApi(
+    s => task.parent_task_id ? tasksApi.tree(task.parent_task_id, s) : Promise.resolve(null),
+    [task.parent_task_id])
 
   const due = parseIstNaive(task.due_at)
   const done = task.status === 'completed'
@@ -178,6 +202,18 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
             <h2 className={cx('text-[17px] font-semibold leading-snug', done && 'line-through')}>
               {task.title}
             </h2>
+            {/* Which task this one is a CHILD of. `task.parent_task_id` is only
+                a number — parentTree resolves it to a title. Hidden while that
+                fetch hasn't landed yet rather than showing a raw id. */}
+            {task.parent_task_id && parentTree.data && (
+              <button type="button" disabled={!onOpenSubtask}
+                      onClick={() => onOpenSubtask?.(task.parent_task_id!)}
+                      className="mt-1 flex items-center gap-1 text-[12.5px] disabled:cursor-default"
+                      style={{ color: 'var(--text-subtle)' }}>
+                <GitBranch className="size-3" />
+                Part of: <span className="font-medium">{parentTree.data.title}</span>
+              </button>
+            )}
             <div className="mt-1.5 flex items-center gap-1.5 text-[13px]"
                  style={{ color: 'var(--text-muted)' }}>
               <Clock className="size-3.5" /> {due ? dueLabel(due) : 'No time set'}
@@ -207,6 +243,11 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
                 <Pencil className="size-3.5" /> Edit
               </Button>
             )}
+            {!confirmDelete && !done && (
+              <Button size="sm" variant="secondary" onClick={() => setAddingSubtask(true)}>
+                <GitBranch className="size-3.5" /> Add sub-task
+              </Button>
+            )}
             {confirmDelete ? (
               <>
                 <Button size="sm" variant="danger" onClick={() => void remove()}>
@@ -225,6 +266,48 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
               </Button>
             )}
           </div>
+
+          {/* ── sub-tasks ────────────────────────────────────────────── */
+          /* Direct children only (tree.data.children), not the full recursive
+             tree — a grandchild shows up when its own parent is opened, same
+             as this task showed up when ITS parent was opened. Each row opens
+             that child as its own TaskDetail via onOpenSubtask; see there for
+             why it goes through a fresh single-task lookup rather than the
+             lighter tree node. */}
+          {!!task.subtask_count && (
+            <div className="mb-4">
+              <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-[.1em]"
+                   style={{ color: 'var(--text-subtle)' }}>
+                Sub-tasks ({task.subtask_count})
+              </div>
+              {tree.loading && !tree.data ? (
+                <p className="text-[13px]" style={{ color: 'var(--text-subtle)' }}>Loading…</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {(tree.data?.children ?? []).map(child => (
+                    <button key={child.id} type="button"
+                            onClick={() => onOpenSubtask?.(child.id)}
+                            disabled={!onOpenSubtask}
+                            className="flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left
+                                       transition hover:brightness-95 disabled:cursor-default disabled:hover:brightness-100"
+                            style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}>
+                      <span className={cx('min-w-0 flex-1 truncate text-[13px] font-medium',
+                                          (child.status === 'completed' || child.status === 'cancelled') && 'line-through')}
+                            style={{ color: 'var(--text)' }}>
+                        {child.title}
+                      </span>
+                      {child.assigned_to_name && (
+                        <span className="shrink-0 text-[11.5px]" style={{ color: 'var(--text-subtle)' }}>
+                          {child.assigned_to_name}
+                        </span>
+                      )}
+                      <Badge tone={child.status}>{STATUS_LABEL[child.status] ?? child.status}</Badge>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ── description ─────────────────────────────────────────── */}
           {/* HEADING AND BODY TOGETHER, or neither.
@@ -343,6 +426,18 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
                 setEditing(false)
                 // Reload rather than patching locally: an edit can change due_at,
                 // which moves the task between buckets on the list behind this.
+                onChanged()
+              }}
+            />
+          )}
+
+          {addingSubtask && (
+            <NewTaskSheet
+              parentTask={task}
+              onClose={() => setAddingSubtask(false)}
+              onCreated={() => {
+                setAddingSubtask(false)
+                // subtask_count on the PARENT changed, not just the list.
                 onChanged()
               }}
             />

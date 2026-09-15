@@ -477,6 +477,7 @@ export function TodayScreen() {
           task={openTask}
           onClose={() => setOpenTask(null)}
           onChanged={t.reload}
+          onOpenSubtask={id => { void tasksApi.single(id).then(setOpenTask) }}
         />
       )}
       {openMeeting && (

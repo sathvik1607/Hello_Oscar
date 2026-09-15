@@ -200,6 +200,9 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee, bothParti
                                terminal && 'line-through')}>
               {task.title}
             </div>
+            {/* Leadership-owned parent task — only the owner can complete it,
+                even once every child task under it is done. */}
+            {!!task.is_goal && <Badge tone="brand">Goal</Badge>}
             <Badge tone={task.status}>{STATUS_LABEL[task.status] ?? task.status}</Badge>
           </div>
 
@@ -228,6 +231,9 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee, bothParti
                 <MessageSquare className="size-3" /> {unread}
               </span>
             )}
+            {/* Not its own click target — it's already inside the card's own
+                onOpen button below, and TaskDetail is what actually lists
+                the children by name (see its "Sub-tasks" section). */}
             {!!task.subtask_count && (
               <span className={cx('flex shrink-0 items-center gap-1 text-xs',
                                   unread > 0 ? 'ml-2' : 'ml-auto')}

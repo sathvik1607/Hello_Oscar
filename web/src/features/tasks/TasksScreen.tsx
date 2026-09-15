@@ -441,7 +441,14 @@ export function TasksScreen({ target }: {
       {openTask && (
         <TaskDetail task={openTask} focusThread={focusThread}
                     onClose={() => { setOpenTask(null); setFocusThread(false) }}
-                    onChanged={() => { mine.reload(); source.reload() }} />
+                    onChanged={() => { mine.reload(); source.reload() }}
+                    onOpenSubtask={id => {
+                      // Fire-and-forget: a sub-task assigned to someone else
+                      // (or the parent of one) may not be in this screen's own
+                      // lists at all, so this always goes to the server rather
+                      // than searching what is already loaded.
+                      void tasksApi.single(id).then(setOpenTask)
+                    }} />
       )}
     </div>
   )

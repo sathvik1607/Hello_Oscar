@@ -18,7 +18,7 @@ import { noteServerBuild } from './freshness'
 import type {
   AppNotification, BusinessProfile, ChatMessage, ChatSession, ChatText,
   CommentAttachment, Conversations, LoginResponse, Meeting, Note, PlanDayResponse,
-  Task, TaskComment, TeamMember,
+  Task, TaskComment, TaskTreeNode, TeamMember,
 } from './types'
 
 export class ApiError extends Error {
@@ -216,6 +216,11 @@ export const tasks = {
      *  `GET /teams/{id}/tasks?project=true`, i.e. from My Team — which is the whole
      *  point of the distinction. */
     is_project?: boolean
+    /** Leadership-owned parent task. Rejected server-side (403) unless the
+     *  caller is the team lead. */
+    is_goal?: boolean
+    /** Create this task as a CHILD of an existing one. */
+    parent_task_id?: number
   }) => request<{ ok: boolean; task: Task }>('/items', {
     method: 'POST', body: { ...body, user_id: requireUserId(), item_type: 'task' },
   }).then(r => r.task),
@@ -257,6 +262,23 @@ export const tasks = {
   timeline: (taskId: number, signal?: AbortSignal) =>
     request<{ task_id: number; timeline: unknown[] }>(
       `/tasks/${taskId}/timeline?user_id=${requireUserId()}`, { signal }),
+
+  /** The task rooted at taskId plus its full child tree, recursively — used
+   *  for the "N sub-tasks" count (clicking it) and, reading a leaf's own
+   *  `parent_task_id`, for a single parent lookup via `tree(parent_task_id)`
+   *  when a task needs to show what it is a child OF. */
+  tree: (taskId: number, signal?: AbortSignal) =>
+    request<TaskTreeNode>(
+      `/tasks/${taskId}/tree?user_id=${requireUserId()}`, { signal }),
+
+  /** One task, the FULL shape (same as every row in `mine()`/`byStatus()`) —
+   *  for opening a task NOT already in a list the caller fetched, e.g. a
+   *  sub-task assigned to someone else, or the parent of a task the caller
+   *  is looking at. Same access rule as comments: owner, any assignee, or a
+   *  team lead of either — a 404 here can mean "no such task" OR "not
+   *  yours to see", same ambiguity as everywhere else in this API. */
+  single: (taskId: number, signal?: AbortSignal) =>
+    request<Task>(`/tasks/${taskId}/single?user_id=${requireUserId()}`, { signal }),
 
   comments: (taskId: number, signal?: AbortSignal) =>
     request<{ task_id: number; comments: TaskComment[] }>(
