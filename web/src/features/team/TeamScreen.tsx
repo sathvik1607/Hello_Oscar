@@ -148,8 +148,16 @@ export function TeamScreen() {
     // not clutter. The unpicked WORKSPACE view still hides every sub-task —
     // a lead scanning the whole team doesn't want every Goal's children
     // interleaved with the Goals themselves.
+    //
+    // 🔴 CHECKED AGAINST `selected` DIRECTLY, NOT `is_mine`. `is_mine` is
+    // computed server-side against the API CALLER (you, the lead viewing
+    // this screen), not against the picked member — and the workspace-wide
+    // route (GET /teams/{id}/tasks) never even receives a viewer_id, so
+    // is_mine comes back false for EVERY task there regardless of who it's
+    // assigned to. A sub-task assigned to the picked member is real work on
+    // THEIR plate whether or not it also happens to be yours.
     let raw = (selected ? (memberTasks.data?.tasks ?? []) : (projects.data?.tasks ?? []))
-      .filter(t => !t.parent_task_id || (selected && t.is_mine))
+      .filter(t => !t.parent_task_id || (!!selected && t.assigned_to_user_id === selected))
     /**
      * 🔴 THE WORKSPACE VIEW IS LEAD-ONLY FOR THE FULL ROSTER. A regular member
      * picking "ALUMNX AI LABS" (the workspace card) does not see every project
