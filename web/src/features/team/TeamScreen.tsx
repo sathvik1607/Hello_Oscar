@@ -141,7 +141,15 @@ export function TeamScreen() {
    * task sitting between two live ones answers a question nobody asked.
    */
   const shown = useMemo(() => {
-    let raw = selected ? (memberTasks.data?.tasks ?? []) : (projects.data?.tasks ?? [])
+    // A sub-task is reached by opening its parent, not by appearing here as
+    // its own second row — EXCEPT with a member PICKED (`selected`), whose
+    // own list is "what does THIS person have to do", same reasoning as
+    // Today/Tasks: a sub-task assigned to them is real work on their plate,
+    // not clutter. The unpicked WORKSPACE view still hides every sub-task —
+    // a lead scanning the whole team doesn't want every Goal's children
+    // interleaved with the Goals themselves.
+    let raw = (selected ? (memberTasks.data?.tasks ?? []) : (projects.data?.tasks ?? []))
+      .filter(t => !t.parent_task_id || (selected && t.is_mine))
     /**
      * 🔴 THE WORKSPACE VIEW IS LEAD-ONLY FOR THE FULL ROSTER. A regular member
      * picking "ALUMNX AI LABS" (the workspace card) does not see every project

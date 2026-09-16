@@ -172,6 +172,11 @@ const TONES: Record<string, { bg: string; fg: string }> = {
   overdue:     { bg: 'rgba(239,68,68,.13)',   fg: '#DC2626' },
   brand:       { bg: 'var(--accent-soft)',    fg: 'var(--accent)' },
   neutral:     { bg: 'var(--bg-sunken)',      fg: 'var(--text-muted)' },
+  // A Goal whose every child task is done, still waiting on its owner to
+  // review and close it. Same orange as `in_progress` — both mean "not
+  // finished, needs a human to act" — rather than inventing a third shade
+  // that would ask the eye to learn one more color for one more state.
+  review:      { bg: 'rgba(245,158,11,.14)',  fg: '#B45309' },
 }
 
 export function Badge({ children, tone = 'neutral', className }: {

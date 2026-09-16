@@ -221,8 +221,17 @@ export function TasksScreen({ target }: {
     const t = setTimeout(() => setGlow(null), 2600)
     return () => clearTimeout(t)
   }, [target, mine.data, byStatus.data, status])
+  /** A sub-task lives inside its parent's own detail screen (the "Sub-tasks"
+   *  section there), not as a second row here — UNLESS it's your own work
+   *  (`is_mine`), in which case hiding it would mean this screen, whose
+   *  whole job is "what do I have to do", simply doesn't show it. `mine` is
+   *  already scoped to you, so a filtered-out sub-task here is one you
+   *  created for someone ELSE and are only tracking, not doing. Search is a
+   *  separate exception (see `listed` below) — "find me the task about X"
+   *  should still find any sub-task by name, yours or not. */
   const open = useMemo(
-    () => allMine.filter(t => t.status !== 'completed' && t.status !== 'cancelled'),
+    () => allMine.filter(t => t.status !== 'completed' && t.status !== 'cancelled'
+                            && (!t.parent_task_id || t.is_mine)),
     [allMine])
 
   /** Date sections over whatever the status filter selected. `All` shows OPEN work —
@@ -249,7 +258,8 @@ export function TasksScreen({ target }: {
       ])
       return filterTasks(pool, query).sort(byDueAsc)
     }
-    return status === 'open' ? open : (byStatus.data?.tasks ?? [])
+    return status === 'open' ? open
+      : (byStatus.data?.tasks ?? []).filter(t => !t.parent_task_id || t.is_mine)
   }, [searching, query, allMine, delegated.data, byStatus.data, status, open])
   const sections = useMemo(() => groupByDueDate(listed), [listed])
 

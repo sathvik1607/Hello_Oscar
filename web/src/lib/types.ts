@@ -88,6 +88,11 @@ export type Task = {
    *  item_service.complete_item on the backend — even after every child task
    *  under it is done. */
   is_goal?: boolean
+  /** Direct children NOT YET completed/cancelled. Paired with subtask_count:
+   *  subtask_count > 0 && subtasks_pending === 0 means every child is done
+   *  and (for a Goal) it's waiting on the owner to review and close it. Only
+   *  meaningful when subtask_count > 0 — check that first. */
+  subtasks_pending?: number
   risk_flag?: number
   item_type?: 'task' | 'meeting'
   /** "14 of 307 done" — the rollup the roster is capped to avoid shipping. */

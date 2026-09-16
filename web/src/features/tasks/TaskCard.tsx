@@ -68,6 +68,13 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee, bothParti
   // through — that is what ticking something off looks like. (The CALENDAR uses
   // the opposite rule for completed items; see CalendarScreen.)
   const terminal = done || task.status === 'cancelled'
+  /** A Goal, still open, every child already done — the "close the loop"
+   *  moment leadership asked to be visible without opening the task. Gated
+   *  on subtask_count first: subtasks_pending is meaningless (always 0) on a
+   *  task with no children, so without that check every childless Goal would
+   *  read as "awaiting review" the instant it was created. */
+  const awaitingReview = !!task.is_goal && !terminal
+    && (task.subtask_count ?? 0) > 0 && (task.subtasks_pending ?? 0) === 0
   const shared = (task.assignee_count ?? task.assignees.length) > 1
 
   /**
@@ -120,8 +127,12 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee, bothParti
           /* Unseen comments TINT THE EXISTING BORDER rather than adding a ring around
              it. A box-shadow ring sits outside the 1px border and reads as two edges
              of slightly different colour — which is exactly what looked unclean. One
-             edge, one colour, and the card's geometry is untouched. */
-          style={unread > 0 ? { borderColor: 'var(--accent)' } : undefined}>
+             edge, one colour, and the card's geometry is untouched.
+             Unread comments win when both apply — a message waiting for a reply is
+             the more time-sensitive of the two, and the Review badge is still right
+             there in the title row either way. */
+          style={unread > 0 ? { borderColor: 'var(--accent)' }
+                : awaitingReview ? { borderColor: '#B45309' } : undefined}>
       <div className="flex items-start gap-3 p-3.5">
         {/* A CIRCLE, like the mobile card — and its own button, not a click on the
             row: a row that both opens and completes means every mis-tap either loses
@@ -201,9 +212,25 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee, bothParti
               {task.title}
             </div>
             {/* Leadership-owned parent task — only the owner can complete it,
-                even once every child task under it is done. */}
-            {!!task.is_goal && <Badge tone="brand">Goal</Badge>}
-            <Badge tone={task.status}>{STATUS_LABEL[task.status] ?? task.status}</Badge>
+                even once every child task under it is done. Flips to
+                "Review" the moment every child finishes — that IS the
+                signal leadership asked to see without opening the task,
+                so it replaces the plain Goal badge rather than sitting
+                beside it (two badges arguing over which to read first). */}
+            {!!task.is_goal && (
+              <Badge tone={awaitingReview ? 'review' : 'brand'}>
+                {awaitingReview ? 'Review' : 'Goal'}
+              </Badge>
+            )}
+            {/* "To do" is suppressed ON A GOAL — pending is a Goal's resting
+                state (it starts pending and stays that way through however
+                many sub-tasks finish), so pairing it with the Goal badge is
+                a status that never changes reading as information. Every
+                OTHER status still shows even on a Goal — "In progress",
+                "Done", "Cancelled" are real transitions worth seeing. */}
+            {!(task.is_goal && task.status === 'pending') && (
+              <Badge tone={task.status}>{STATUS_LABEL[task.status] ?? task.status}</Badge>
+            )}
           </div>
 
           {/* ── meta row: sub-tasks, sharing, comments ─────────────────

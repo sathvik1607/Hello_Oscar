@@ -101,7 +101,15 @@ export function TodayScreen() {
   const [time, setTime] = useState<string>(currentTime)
   const [timePicked, setTimePicked] = useState(false)
 
-  const allTasks = useMemo(() => t.data?.tasks ?? [], [t.data])
+  // A sub-task is reached by opening its parent (the "Sub-tasks" section on
+  // TaskDetail) UNLESS it's on YOUR OWN plate — is_mine — in which case
+  // hiding it here would mean nowhere shows it as work to actually do. This
+  // is your own list already (GET /tasks/{user_id}), so every row is either
+  // something you own or something assigned to you; the sub-tasks that get
+  // filtered are ones you created FOR someone else and are just tracking.
+  const allTasks = useMemo(
+    () => (t.data?.tasks ?? []).filter(x => !x.parent_task_id || x.is_mine),
+    [t.data])
   const timeline = useMemo(() => todayTimeline(allTasks, day), [allTasks, day])
   const done = useMemo(() => timeline.filter(x => x.status === 'completed'), [timeline])
 

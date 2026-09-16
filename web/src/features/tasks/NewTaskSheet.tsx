@@ -174,11 +174,13 @@ export function NewTaskSheet({
   // representation — a null due_at is NOT (POST /items rejects it, and a dateless
   // task falls out of every date-grouped view including Today).
   const [description, setDescription] = useState(task?.description ?? '')
-  /** A leadership-owned parent task. Team-lead only, create only — a Goal isn't
-   *  something a task flips into or out of after the fact. The backend rejects
-   *  this (403) if the caller isn't the team lead, so the checkbox is hidden
-   *  for anyone else rather than letting them hit that error. */
-  const [isGoal, setIsGoal] = useState(false)
+  /** A leadership-owned parent task. TICKED BY DEFAULT for a team lead's own
+   *  top-level task — matches what the backend already defaults to when this
+   *  field is left unset, so the checkbox is showing the true starting state
+   *  rather than a separate opinion the form has to keep in sync with. Still
+   *  editable: unchecking it sends `is_goal: false` explicitly, which the
+   *  backend honours over its own default. */
+  const [isGoal, setIsGoal] = useState(true)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   /** "Task created" — shown briefly instead of closing, only when
@@ -276,7 +278,12 @@ export function NewTaskSheet({
           // team work by definition, and a personal task assigned to someone else
           // would be invisible to the lead who has to track it.
           is_project: delegated ? true : isProject,
-          ...(isGoal ? { is_goal: true } : {}),
+          // Sent EXPLICITLY, not left to the backend's own default — the
+          // checkbox below starts ticked (matching that default) but must be
+          // able to override it when a lead unchecks it. Omitted entirely for
+          // a sub-task, which is never offered the checkbox and is never a
+          // Goal regardless of what this state happens to hold.
+          ...(!parentTask ? { is_goal: isGoal } : {}),
           ...(parentTask ? { parent_task_id: parentTask.id } : {}),
         }
         if (broadcasting && everyone?.length) {
@@ -637,8 +644,10 @@ export function NewTaskSheet({
 
           {/* Team-lead only, create only. Hidden for anyone else and while
               editing rather than shown-and-disabled, since a Goal isn't
-              something a task flips into after the fact and a non-lead
-              would only ever see it 403. */}
+              something a task flips into after the fact and a non-lead would
+              only ever see it 403. TICKED BY DEFAULT — the backend already
+              defaults a lead's top-level task to a Goal, this just makes that
+              visible and gives an out to uncheck it. */}
           {!editing && !parentTask && me?.role === 'team_lead' && (
             <label className="flex w-full items-center gap-2.5 rounded-xl border px-3 py-2"
                    style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}>

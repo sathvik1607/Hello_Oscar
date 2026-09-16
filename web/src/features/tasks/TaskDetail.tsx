@@ -7,7 +7,7 @@ import { ApiError, tasks as tasksApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { getUser } from '../../lib/session'
 import { dueLabel, messageTime, parseIstNaive, relative, isReallyOverdue } from '../../lib/format'
-import type { CommentAttachment, Task } from '../../lib/types'
+import type { CommentAttachment, Task, TaskTreeNode } from '../../lib/types'
 import { CommentComposer, CommentList, useCommentThread } from './CommentThread'
 import { AttachmentChip } from './AttachmentChip'
 import { NewTaskSheet } from './NewTaskSheet'
@@ -69,6 +69,11 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [editing, setEditing] = useState(false)
   const [addingSubtask, setAddingSubtask] = useState(false)
+  /** Which sub-task's own tick is mid-flight — same one-at-a-time guard as
+   *  useTaskActions' busyId, kept local rather than sharing that hook: the
+   *  sub-task list here is TaskTreeNode[], not the Task[] shape that hook's
+   *  patch/reload contract expects. */
+  const [subtaskBusyId, setSubtaskBusyId] = useState<number | null>(null)
   // Open by default — matching mobile, where these are shown expanded. They
   // used to be secondary metadata (created/completed timestamps) worth
   // tucking away; now they carry who the task is FOR, which is core
@@ -135,6 +140,27 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
       setErr(e instanceof ApiError ? e.message : String(e))
     } finally { setBusyAction(false) }
   }, [done, task.id, onChanged])
+
+  /** Tick/reopen a CHILD directly from its row, without opening its own
+   *  detail screen first — the whole point of putting a circle on the row.
+   *  Refetches THIS task's own tree (not the child's), since that is what
+   *  the row reads from; the child's OWN detail screen (if opened separately)
+   *  refetches itself independently. */
+  const toggleSubtask = useCallback(async (child: TaskTreeNode) => {
+    if (subtaskBusyId === child.id) return
+    setSubtaskBusyId(child.id)
+    setErr(null)
+    try {
+      if (child.status === 'completed') await tasksApi.setStatus(child.id, 'pending')
+      else await tasksApi.complete(child.id)
+      tree.reload()
+      onChanged()
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : String(e))
+    } finally {
+      setSubtaskBusyId(null)
+    }
+  }, [subtaskBusyId, tree, onChanged])
 
   const remove = useCallback(async () => {
     setErr(null)
@@ -284,26 +310,48 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
                 <p className="text-[13px]" style={{ color: 'var(--text-subtle)' }}>Loading…</p>
               ) : (
                 <div className="space-y-1.5">
-                  {(tree.data?.children ?? []).map(child => (
-                    <button key={child.id} type="button"
-                            onClick={() => onOpenSubtask?.(child.id)}
-                            disabled={!onOpenSubtask}
-                            className="flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left
-                                       transition hover:brightness-95 disabled:cursor-default disabled:hover:brightness-100"
-                            style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}>
-                      <span className={cx('min-w-0 flex-1 truncate text-[13px] font-medium',
-                                          (child.status === 'completed' || child.status === 'cancelled') && 'line-through')}
-                            style={{ color: 'var(--text)' }}>
-                        {child.title}
-                      </span>
-                      {child.assigned_to_name && (
-                        <span className="shrink-0 text-[11.5px]" style={{ color: 'var(--text-subtle)' }}>
-                          {child.assigned_to_name}
-                        </span>
-                      )}
-                      <Badge tone={child.status}>{STATUS_LABEL[child.status] ?? child.status}</Badge>
-                    </button>
-                  ))}
+                  {(tree.data?.children ?? []).map(child => {
+                    const childDone = child.status === 'completed'
+                    return (
+                      <div key={child.id}
+                           className="flex items-center gap-2 rounded-xl border px-3 py-2"
+                           style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}>
+                        {/* Its OWN button, same reasoning as TaskCard's circle —
+                            a row that both opens and completes means a mis-tap
+                            either loses your place or marks work done that
+                            is not. Ticks the child WITHOUT leaving this Goal's
+                            screen, which is the whole point of it being here
+                            rather than only on the child's own detail. */}
+                        <button type="button"
+                                onClick={() => void toggleSubtask(child)}
+                                disabled={subtaskBusyId === child.id || child.status === 'cancelled'}
+                                aria-label={childDone ? `Reopen ${child.title}` : `Complete ${child.title}`}
+                                className="grid size-[22px] shrink-0 place-items-center rounded-full transition disabled:opacity-40"
+                                style={childDone
+                                  ? { background: '#22C55E', border: '1.5px solid #22C55E' }
+                                  : { border: '1.5px solid var(--border)' }}>
+                          {childDone && <Check className="size-3 text-white" strokeWidth={3.5} />}
+                        </button>
+                        <button type="button"
+                                onClick={() => onOpenSubtask?.(child.id)}
+                                disabled={!onOpenSubtask}
+                                className="flex min-w-0 flex-1 items-center gap-2 text-left
+                                           disabled:cursor-default">
+                          <span className={cx('min-w-0 flex-1 truncate text-[13px] font-medium',
+                                              (childDone || child.status === 'cancelled') && 'line-through')}
+                                style={{ color: 'var(--text)' }}>
+                            {child.title}
+                          </span>
+                          {child.assigned_to_name && (
+                            <span className="shrink-0 text-[11.5px]" style={{ color: 'var(--text-subtle)' }}>
+                              {child.assigned_to_name}
+                            </span>
+                          )}
+                          <Badge tone={child.status}>{STATUS_LABEL[child.status] ?? child.status}</Badge>
+                        </button>
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </div>
