@@ -251,10 +251,10 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee, bothParti
             <div className="mt-0.5 flex min-w-0 items-center gap-1 text-xs"
                  style={{ color: 'var(--text-subtle)' }}>
               <GitBranch className="size-3 shrink-0" />
-              <span className="truncate">
-                Part of: {task.parent_title}
-                {task.parent_tag ? ` (${task.parent_tag})` : ''}
-              </span>
+              {/* Title only — the tag is already shown on the Goal's OWN card
+                  (the "Goal" badge there), so repeating it here on every one of
+                  its sub-tasks would be the same information twice. */}
+              <span className="truncate">Part of: {task.parent_title}</span>
             </div>
           )}
           <div className="mt-1.5 flex items-center gap-2">
