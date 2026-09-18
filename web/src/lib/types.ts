@@ -94,6 +94,9 @@ export type Task = {
    *  item_service.complete_item on the backend — even after every child task
    *  under it is done. */
   is_goal?: boolean
+  /** The Goal's OWN short-form reference code (e.g. "#PTY") — only meaningful
+   *  when is_goal is true; null on an ordinary task. */
+  tag?: string | null
   /** Direct children NOT YET completed/cancelled. Paired with subtask_count:
    *  subtask_count > 0 && subtasks_pending === 0 means every child is done
    *  and (for a Goal) it's waiting on the owner to review and close it. Only

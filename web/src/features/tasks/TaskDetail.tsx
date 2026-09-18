@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
-  Calendar, Check, ChevronDown, Clock, GitBranch, Paperclip, Pencil, Trash2, User,
-  UserCheck, Users, X,
+  Calendar, Check, ChevronDown, Clock, GitBranch, Hash, Paperclip, Pencil, Trash2,
+  User, UserCheck, Users, X,
 } from 'lucide-react'
 import { ApiError, tasks as tasksApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
@@ -197,6 +197,11 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
    *  assigned included ("Assigned to: You"), matching mobile rather than the
    *  old suppress-when-you rule. Icons match mobile's own per-row glyphs. */
   const details = useMemo(() => ([
+    // A Goal's own short-form reference code (e.g. "#PTY") — the tag a
+    // sub-task references to attach itself here. First in the list since
+    // it's identity, same footing as "Assigned by/to" rather than provenance.
+    ...(task.is_goal && task.tag
+      ? [{ label: 'Tag', value: task.tag, icon: Hash }] : []),
     { label: 'Assigned by', value: task.owner_name ?? (task.is_mine ? 'You' : '—'), icon: User },
     { label: 'Assigned to', value: task.assigned_to_name ?? (task.is_mine ? 'You' : '—'), icon: UserCheck },
     { label: 'Due', value: due ? dueLabel(due) : 'No time set', icon: Calendar },
