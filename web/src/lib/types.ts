@@ -82,6 +82,12 @@ export type Task = {
   owner_user_id?: number | null
   owner_name?: string | null
   parent_task_id?: number | null
+  /** Parent Goal's own title/tag — null on a top-level task/Goal, or if the
+   *  parent was deleted. Lets a card say "Part of: <Goal>" instead of just
+   *  parent_task_id, which is otherwise indistinguishable from any other
+   *  number on the row. */
+  parent_title?: string | null
+  parent_tag?: string | null
   subtask_count?: number
   is_project?: boolean | number
   /** A leadership-owned parent task. Only the owner can complete it — see

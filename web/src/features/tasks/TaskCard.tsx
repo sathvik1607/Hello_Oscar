@@ -242,6 +242,21 @@ export function TaskCard({ task, onToggle, onOpen, busy, showAssignee, bothParti
 
               The inline time is gone too — it lives in the left column now. Two
               time labels on one card was the original problem. */}
+          {/* A sub-task under a Goal names its parent — without this, a Goal and
+              its own first sub-task (often worded near-identically, since both
+              come from the same user message, e.g. "Push to YouTube and update")
+              were visually indistinguishable in any list that shows both: same
+              title, no badge, no way to tell which row was which. */}
+          {!!task.parent_title && (
+            <div className="mt-0.5 flex min-w-0 items-center gap-1 text-xs"
+                 style={{ color: 'var(--text-subtle)' }}>
+              <GitBranch className="size-3 shrink-0" />
+              <span className="truncate">
+                Part of: {task.parent_title}
+                {task.parent_tag ? ` (${task.parent_tag})` : ''}
+              </span>
+            </div>
+          )}
           <div className="mt-1.5 flex items-center gap-2">
             {shared && (
               <Badge tone="neutral">
