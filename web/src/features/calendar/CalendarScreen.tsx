@@ -12,6 +12,7 @@ import type { Meeting, Task } from '../../lib/types'
 import { MeetingDetail } from './MeetingDetail'
 import { TaskDetail } from '../tasks/TaskDetail'
 import { EditMeetingSheet } from './EditMeetingSheet'
+import { AvailabilityTab } from './AvailabilityTab'
 import {
   Badge, Button, Card, EmptyState, ErrorState, SectionHeading, Skeleton, cx,
 } from '../../ui'
@@ -53,6 +54,10 @@ export function CalendarScreen({ target }: {
   const [focusThread, setFocusThread] = useState(false)
   const [openTask, setOpenTask] = useState<Task | null>(null)
   const [creating, setCreating] = useState(false)
+  // Local tab, same pattern as monthAnchor/selectedKey above — no router
+  // change needed for a view that only ever changes what THIS screen shows
+  // below the day header.
+  const [dayView, setDayView] = useState<'agenda' | 'availability'>('agenda')
 
   const m = useApi(s => meetingsApi.all(s), [], 'meetings:all')
   const t = useApi(s => tasksApi.mine(s), [], 'tasks:mine')
@@ -253,7 +258,7 @@ export function CalendarScreen({ target }: {
         <h2 className="text-[15px] font-semibold">
           {selectedKey === todayKey ? 'Today' : dayLabel(selected)}
         </h2>
-        {dayRows.length > 0 && (
+        {dayView === 'agenda' && dayRows.length > 0 && (
           <span className="text-xs tabular-nums" style={{ color: 'var(--text-subtle)' }}>
             {(() => {
               // Counts the two KINDS separately. "5 items" tells you nothing about
@@ -271,6 +276,28 @@ export function CalendarScreen({ target }: {
         )}
       </div>
 
+      {/* Agenda / Availability — a local view switch for the SAME selected day,
+        * not a separate page: picking a date above should drive whichever one
+        * is open, so this sits below the day header rather than beside the
+        * month grid. */}
+      <div className="flex gap-1 px-1">
+        {(['agenda', 'availability'] as const).map(v => (
+          <button
+            key={v}
+            onClick={() => setDayView(v)}
+            className="rounded-full px-3 py-1 text-xs font-semibold transition"
+            style={dayView === v
+              ? { background: 'var(--accent)', color: '#fff' }
+              : { background: 'var(--bg-sunken)', color: 'var(--text-muted)' }}
+          >
+            {v === 'agenda' ? 'Agenda' : 'Availability'}
+          </button>
+        ))}
+      </div>
+
+      {dayView === 'availability' && <AvailabilityTab dateKey={selectedKey} />}
+
+      {dayView === 'agenda' && <>
       {loading && <Skeleton rows={3} />}
       {error && !m.data && !t.data && (
         <ErrorState error={error} onRetry={() => { m.reload(); t.reload() }} />
@@ -329,6 +356,7 @@ export function CalendarScreen({ target }: {
           )
         })()}
       </div>
+      </>}
 
       {openTask && (
         <TaskDetail task={openTask} focusThread={focusThread}

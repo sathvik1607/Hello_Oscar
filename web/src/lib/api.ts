@@ -380,6 +380,28 @@ export const meetings = {
     '/meetings', { method: 'POST', body: { ...body, user_id: requireUserId() } }),
 }
 
+// ── availability ─────────────────────────────────────────────────────────────
+
+/** Backs the Calendar page's "Availability" tab — a preview of the signed-in
+ *  user's own free/busy 15-min slots for one day, sourced from the SAME
+ *  `/internal/calendar/*` endpoints built for the WhatsApp Info-Agent
+ *  integration. Read-only here: marking a range does not persist anything
+ *  server-side yet (no per-user custom-hours table exists) — see
+ *  AvailabilityTab's own docstring. */
+export const availability = {
+  /** 10:00–18:00 IST, 15-min grid, existing meetings excluded — covering every
+   *  day from TODAY through `days` days out.
+   *
+   *  🔴 The backend has no "give me just this one future date" param — it only
+   *  ever walks forward from `now`, so a picked date beyond today means asking
+   *  for enough days to cover it and filtering client-side to that date's
+   *  slots (see AvailabilityTab). `days` is capped at 30 there too; this
+   *  wrapper does not re-enforce it, since the backend already clamps it. */
+  freeSlots: (days: number, signal?: AbortSignal) =>
+    request<{ user_id: number; timezone: string; slots: { start: string; end: string }[] }>(
+      `/internal/calendar/free-slots?user_id=${requireUserId()}&days=${days}`, { signal }),
+}
+
 // ── chat ─────────────────────────────────────────────────────────────────────
 
 export const chat = {
