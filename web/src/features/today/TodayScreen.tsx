@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { CalendarClock, Flame, CheckCircle2, Clock, Pencil, Plus } from 'lucide-react'
+import { CalendarClock, Flame, CheckCircle2, Clock, Pencil, Plus, Target } from 'lucide-react'
 import { meetings as meetingsApi, tasks as tasksApi, team as teamApi } from '../../lib/api'
 import { getUser } from '../../lib/session'
 import { useApi } from '../../lib/useApi'
@@ -12,6 +12,7 @@ import { TaskCard } from '../tasks/TaskCard'
 import { TimelineEditor } from '../tasks/TimelineEditor'
 import { useTaskActions } from '../tasks/useTaskActions'
 import { TaskDetail } from '../tasks/TaskDetail'
+import { GoalsSheet } from '../tasks/GoalsSheet'
 import { useUnreadComments } from '../tasks/useUnreadComments'
 import { NewTaskSheet } from '../tasks/NewTaskSheet'
 import { MeetingDetail } from '../calendar/MeetingDetail'
@@ -55,6 +56,12 @@ export function TodayScreen() {
   // because no per-viewer read state exists on pa_task_comments.
   const comments = useUnreadComments()
   const [openMeeting, setOpenMeeting] = useState<Meeting | null>(null)
+  /** Goals (BRD P0.7/P0.8) — same GoalsSheet TasksScreen already opens, given
+   *  a second entry point here so seeing "what goal is this task under" and
+   *  "what else is in that goal" doesn't require leaving Today first. Its
+   *  own state, not a third status pill — see GoalsSheet/TasksScreen for why
+   *  this is a separate sheet rather than folded into the timeline. */
+  const [goalsOpen, setGoalsOpen] = useState(false)
   /* Creating a task is the action this screen is missing, and it was the one thing
      the primary button did NOT do — "Ask Oscar" opened a voice call, which is a
      slower and less certain way to add a line to a list you are already looking at.
@@ -295,6 +302,16 @@ export function TodayScreen() {
                 Clear time
               </button>
             )}
+            {/* Goals (BRD P0.7/P0.8) — same button TasksScreen offers, so
+                seeing which goal a task belongs to (or browsing goals
+                outright) doesn't require leaving Today. */}
+            <button type="button" onClick={() => setGoalsOpen(true)}
+                    className="ml-auto flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[13px] font-medium transition"
+                    style={{ background: 'var(--bg)', borderColor: 'var(--border)',
+                             color: 'var(--text-muted)' }}>
+              <Target className="size-3.5" />
+              Goals
+            </button>
           </div>
 
           <div className="mt-5 sm:hidden">
@@ -491,6 +508,12 @@ export function TodayScreen() {
       {openMeeting && (
         <MeetingDetail meeting={openMeeting} onClose={() => setOpenMeeting(null)}
                        onChanged={() => { m.reload(); t.reload() }} />
+      )}
+      {goalsOpen && (
+        <GoalsSheet onClose={() => setGoalsOpen(false)}
+                    // A task picked from a Goal's list opens THIS screen's own
+                    // TaskDetail/state, same reasoning TasksScreen uses.
+                    onOpenTask={picked => { setGoalsOpen(false); setOpenTask(picked) }} />
       )}
     </div>
   )

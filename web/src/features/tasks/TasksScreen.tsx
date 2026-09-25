@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CheckSquare, Search, X } from 'lucide-react'
+import { CheckSquare, Search, Target, X } from 'lucide-react'
 import { tasks as tasksApi } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
 import type { Task } from '../../lib/types'
 import { byDueAsc, groupByDueDate } from './buckets'
 import { dedupeById, filterTasks } from './taskSearch'
+import { GoalsSheet } from './GoalsSheet'
 import { TaskCard } from './TaskCard'
 import { TaskDetail } from './TaskDetail'
 import { useUnreadComments } from './useUnreadComments'
@@ -66,6 +67,11 @@ export function TasksScreen({ target }: {
    */
   const [status, setStatus] = useState<'open' | 'completed'>('open')
   const [openTask, setOpenTask] = useState<Task | null>(null)
+  /** Goals is a SEPARATE sheet, not a third status chip — see GoalsSheet's
+   *  own docstring for why: which goal a task belongs to is a different axis
+   *  from status, and this screen's own history already argued against more
+   *  status-like chips. */
+  const [goalsOpen, setGoalsOpen] = useState(false)
   // Unread comments per task — the badge and the glow on each card, and the
   // clear when one is opened. See useUnreadComments: derived from the bell rows
   // because no per-viewer read state exists on pa_task_comments.
@@ -326,6 +332,17 @@ export function TasksScreen({ target }: {
         )}
       </form>
 
+      {/* Goals (BRD P0.7/P0.8) — its own button, not a status chip. Opens a
+          separate sheet: pick a goal, see its tasks. See GoalsSheet for why
+          this isn't a third chip alongside Open/Done below. */}
+      <button onClick={() => setGoalsOpen(true)}
+              className="flex items-center gap-1.5 self-start rounded-full border px-3.5 py-1.5 text-[13px] font-medium transition"
+              style={{ background: 'var(--bg)', borderColor: 'var(--border)',
+                       color: 'var(--text-muted)' }}>
+        <Target className="size-3.5" />
+        Goals
+      </button>
+
       {/* STATUS FILTER — and it is DISABLED while a query is present, not silently
           overruled. A search spans every status by design (that is the point of it
           being on this screen), so leaving the chips live would let you press Open
@@ -459,6 +476,14 @@ export function TasksScreen({ target }: {
                       // than searching what is already loaded.
                       void tasksApi.single(id).then(setOpenTask)
                     }} />
+      )}
+
+      {goalsOpen && (
+        <GoalsSheet onClose={() => setGoalsOpen(false)}
+                    // A task picked from a Goal's list opens THIS screen's own
+                    // TaskDetail/state, not a second copy GoalsSheet would
+                    // otherwise own — same reasoning as onOpenSubtask above.
+                    onOpenTask={t => { setGoalsOpen(false); setOpenTask(t) }} />
       )}
     </div>
   )

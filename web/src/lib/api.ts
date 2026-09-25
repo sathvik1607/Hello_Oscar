@@ -319,6 +319,26 @@ export const tasks = {
       { method: 'POST', body: { body, ...(attachment_ids?.length ? { attachment_ids } : {}) } }),
 }
 
+/** BRD P0.7/P0.8 — REST counterparts to the chat-only get_goals/get_goal_tasks
+ *  tools (Oscar backend). A Goal is a normal Item with is_goal=true, so these
+ *  return the SAME shape `tasks.mine()` etc. already use — no new type. */
+export type GoalList = { count: number; goals: Task[] }
+export type GoalTasks = { goal: Task; count: number; tasks: Task[] }
+
+export const goals = {
+  /** Every active Goal on a team. teamId comes from the caller (getUser()?.team_id)
+   *  — a teamless/personal user has no team to scope this to, so the caller is
+   *  expected not to call this route at all rather than this module guessing a
+   *  fallback team. */
+  forTeam: (teamId: number, signal?: AbortSignal) =>
+    request<GoalList>(`/teams/${teamId}/goals`, { signal }),
+
+  /** The tasks under ONE Goal, plus the Goal's own row (so a screen opened
+   *  directly by goalId doesn't need a second fetch to show the Goal's title/tag). */
+  tasks: (goalId: number, signal?: AbortSignal) =>
+    request<GoalTasks>(`/goals/${goalId}/tasks`, { signal }),
+}
+
 // ── meetings / calendar ──────────────────────────────────────────────────────
 
 export const meetings = {
