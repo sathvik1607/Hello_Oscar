@@ -382,15 +382,16 @@ export const meetings = {
 
 // ── availability ─────────────────────────────────────────────────────────────
 
-/** Backs the Calendar page's "Availability" tab — a preview of the signed-in
- *  user's own free/busy 15-min slots for one day, sourced from the SAME
- *  `/internal/calendar/*` endpoints built for the WhatsApp Info-Agent
- *  integration. Read-only here: marking a range does not persist anything
- *  server-side yet (no per-user custom-hours table exists) — see
- *  AvailabilityTab's own docstring. */
+/** Backs the Calendar page's "Availability" tab — the signed-in user's own
+ *  free/busy slots for one day, PLUS the ability to save custom bookable
+ *  hours for a specific date at a chosen interval (15/30/45/60 min). Same
+ *  `/internal/calendar/*` endpoints the WhatsApp Info-Agent integration uses
+ *  for "Call with <person>", so a lead booking through WhatsApp always sees
+ *  exactly what this tab shows. */
 export const availability = {
-  /** 10:00–18:00 IST, 15-min grid, existing meetings excluded — covering every
-   *  day from TODAY through `days` days out.
+  /** A date's own saved ranges if any exist (via `set`, below); otherwise the
+   *  backend's hardcoded 10:00–18:00 @ 15-min default — covering every day
+   *  from TODAY through `days` days out.
    *
    *  🔴 The backend has no "give me just this one future date" param — it only
    *  ever walks forward from `now`, so a picked date beyond today means asking
@@ -400,6 +401,32 @@ export const availability = {
   freeSlots: (days: number, signal?: AbortSignal) =>
     request<{ user_id: number; timezone: string; slots: { start: string; end: string }[] }>(
       `/internal/calendar/free-slots?user_id=${requireUserId()}&days=${days}`, { signal }),
+
+  /** REPLACES every saved range for this user on this ONE date — not
+   *  additive. Each range carries its OWN slot_minutes, so a day can mix
+   *  granularities (e.g. 30-min in the morning, 15-min in the afternoon).
+   *  Ranges must not overlap; the backend 400s if they do. */
+  set: (date: string, ranges: { start: string; end: string; slot_minutes: number }[]) =>
+    request<{ ok: boolean; date: string; ranges_saved: number }>(
+      '/internal/calendar/set-availability',
+      { method: 'POST', body: { user_id: requireUserId(), date, ranges } }),
+
+  /** The RANGES actually configured for one date — custom saved ones if any
+   *  exist, else the same default `set` above falls back to.
+   *
+   *  🔴 Deliberately separate from `freeSlots`: that endpoint only ever
+   *  returns individual FREE slots, so a fully-booked date comes back as an
+   *  empty list — indistinguishable from "nothing configured". This is what
+   *  AvailabilityTab uses to draw the grid's actual shape (including its
+   *  booked cells, which still need to render), while `freeSlots` says which
+   *  of those cells are open. */
+  get: (date: string, signal?: AbortSignal) =>
+    request<{
+      user_id: number
+      date: string
+      custom: boolean
+      ranges: { start: string; end: string; slot_minutes: number }[]
+    }>(`/internal/calendar/availability?user_id=${requireUserId()}&date=${date}`, { signal }),
 }
 
 // ── chat ─────────────────────────────────────────────────────────────────────
