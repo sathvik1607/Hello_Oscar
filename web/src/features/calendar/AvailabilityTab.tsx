@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { availability as availabilityApi, ApiError } from '../../lib/api'
 import { useApi } from '../../lib/useApi'
 import { istDateKey, istNow, parseIstNaive, timeLabel } from '../../lib/format'
+import type { Meeting } from '../../lib/types'
 import { Button, Card, ErrorState, Skeleton, cx } from '../../ui'
 
 const DEFAULT_WORK_START_HOUR = 10
@@ -10,70 +11,123 @@ const DEFAULT_SLOT_MINUTES = 15
 const ALLOWED_INTERVALS = [15, 30, 45, 60] as const
 
 /**
- * A day's slot grid — GREEN where the signed-in user is free, RED with a
- * strikethrough where a real meeting already occupies that block, GREY
- * (no click) where the time has already passed today. Backed by the same
- * `GET /internal/calendar/free-slots` and `POST /internal/calendar/
- * set-availability` endpoints built for the WhatsApp Info-Agent's
- * "Call with <person>" flow (see AlumnxAILabs_epa's
- * services/internal_api_router.py) — this tab shows and edits the SAME
- * data a lead booking through WhatsApp would see, so "what does my
- * availability look like" never disagrees between the two surfaces.
+ * A day's slot grid — GREEN where the signed-in user is free, BLUE where a
+ * range is already saved as available, RED with a strikethrough where a
+ * real meeting occupies that block, GREY (no click) where the time has
+ * already passed today.
  *
- * SAVING IS REAL. Selecting a free range and choosing an interval, then
- * pressing Save, calls `availabilityApi.set()` — which REPLACES every saved
- * range for this user on THIS date (see that call's own docstring). A date
- * with nothing saved keeps using the backend's hardcoded 10:00-18:00 @
- * 15-min default; saving here is what moves a date off that default.
+ * 🔴 BOOKED is computed from real MEETINGS directly (the `meetings` prop,
+ * the same list CalendarScreen already fetches for its Agenda view), NOT
+ * from `GET /internal/calendar/free-slots`. That endpoint answers a
+ * DIFFERENT question — "what can Shiva's WhatsApp bot offer a lead" — and
+ * once ANY custom range is saved for a date, it deliberately narrows to
+ * ONLY the saved ranges (the person's real bookable hours). Reusing it here
+ * would make every slot OUTSIDE a just-saved range look "booked" the moment
+ * you save your first range — exactly the bug this rewrite fixes. This
+ * editing UI needs a wider question — "is there a genuine conflict here" —
+ * answered independently of whatever's saved, so a person can keep adding
+ * more availability across multiple Saves.
+ *
+ * SAVING IS REAL and ADDITIVE. Selecting a free range and choosing an
+ * interval, then pressing Save, calls `availabilityApi.set()` — which ADDS
+ * to whatever ranges are already saved for this date (see that call's own
+ * docstring); it never wipes out an earlier Save. The grid always shows the
+ * FULL default 10:00-18:00 window as the base shape, regardless of what's
+ * already saved, so a person can keep selecting more time on the same date
+ * across multiple Saves — a slot already covered by a saved range renders
+ * as its own SAVED state (blue), distinct from a real meeting (red/booked),
+ * so it's visibly locked in but never confusable with "someone else took
+ * this slot".
  */
-export function AvailabilityTab({ dateKey }: {
+export function AvailabilityTab({ dateKey, meetings }: {
   /** "YYYY-MM-DD" — the date currently selected on the Calendar page's month
    *  grid. Re-used here so picking a day once drives both the agenda below
    *  and this tab, rather than the tab keeping its own separate date state. */
   dateKey: string
+  /** CalendarScreen's own already-fetched meeting list — reused rather than
+   *  a second API call, and it's what determines which slots are genuinely
+   *  BOOKED (see the component docstring). */
+  meetings: Meeting[]
 }) {
-  // The backend only ever walks forward from TODAY, never from an arbitrary
-  // date (see availabilityApi.freeSlots's own comment) — so covering a date
-  // up to 30 days out means asking for that many days and filtering down to
-  // just `dateKey` here. Recomputed whenever the picked date changes so a far
-  // future pick still requests enough days to reach it.
-  const daysNeeded = useMemo(() => {
-    const [y, mo, d] = dateKey.split('-').map(Number)
-    const target = new Date(Date.UTC(y, mo - 1, d, 12))
-    const today = new Date(Date.UTC(
-      Number(istDateKey(istNow()).slice(0, 4)),
-      Number(istDateKey(istNow()).slice(5, 7)) - 1,
-      Number(istDateKey(istNow()).slice(8, 10)), 12))
-    const diffDays = Math.round((target.getTime() - today.getTime()) / 86_400_000)
-    // A past date has no slots to show (the backend never returns them) —
-    // clamp to 1 rather than a negative/zero `days` the backend would reject.
-    return Math.min(30, Math.max(1, diffDays + 1))
-  }, [dateKey])
-
-  const a = useApi(signal => availabilityApi.freeSlots(daysNeeded, signal),
-                    [daysNeeded], `availability:${daysNeeded}`)
-
   // The day's ACTUAL configured ranges (custom if saved, else the backend's
-  // default) — a separate call from freeSlots above, because a fully-booked
-  // date returns zero free slots and that is indistinguishable from "nothing
-  // configured" without asking for the ranges directly. This is what draws
-  // the grid's real shape; freeSlots says which of its cells are open.
+  // default) — used to draw the SAVED overlay and the header subtitle.
   const g = useApi(signal => availabilityApi.get(dateKey, signal),
                     [dateKey], `availability-ranges:${dateKey}`)
 
-  // Only THIS date's free slots, keyed by their exact start timestamp.
+  // Real meeting conflicts for THIS date, as [startMinutes, endMinutes)
+  // pairs on the day's own clock — independent of anything saved.
+  const busyRanges = useMemo(() => {
+    const out: [number, number][] = []
+    for (const m of meetings) {
+      if (m.status === 'cancelled' || m.status === 'completed') continue
+      const start = parseIstNaive(m.scheduled_at)
+      if (!start || istDateKey(start) !== dateKey) continue
+      const end = parseIstNaive(m.ends_at) ?? new Date(start.getTime() + 30 * 60_000)
+      const [sh, sm] = m.scheduled_at!.slice(11, 16).split(':').map(Number)
+      const durationMin = Math.round((end.getTime() - start.getTime()) / 60_000)
+      out.push([sh * 60 + sm, sh * 60 + sm + durationMin])
+    }
+    return out
+  }, [meetings, dateKey])
+
+  const isBusy = (key: string) => {
+    const [ch, cm] = key.slice(11, 16).split(':').map(Number)
+    const cellStart = ch * 60 + cm
+    const cellEnd = cellStart + DEFAULT_SLOT_MINUTES
+    return busyRanges.some(([bs, be]) => bs < cellEnd && be > cellStart)
+  }
+
+  // Always the FULL default window — see the component docstring for why
+  // this no longer switches to the saved ranges' own shape. Saved ranges are
+  // overlaid as a separate visual state (see `savedAt` below), not used to
+  // replace what the grid covers.
+  const grid = useMemo(() => buildDayGrid(dateKey), [dateKey])
+
+  // "Free" = not genuinely busy (a real meeting conflict) — see the
+  // component docstring for why this is sourced from `meetings` rather than
+  // `GET /internal/calendar/free-slots`.
   const freeStarts = useMemo(() => {
     const set = new Set<string>()
-    for (const s of a.data?.slots ?? []) {
-      const at = parseIstNaive(s.start)
-      if (at && istDateKey(at) === dateKey) set.add(s.start)
+    for (const cell of grid) {
+      if (!isBusy(cell.key)) set.add(cell.key)
     }
     return set
-  }, [a.data, dateKey])
+  }, [grid, busyRanges])
 
-  const grid = useMemo(
-    () => buildDayGrid(dateKey, g.data?.ranges ?? null),
-    [dateKey, g.data])
+  // Which grid slots fall inside an ALREADY-SAVED range — checked by minute
+  // offset, not by exact key match, since a saved range's own interval
+  // (e.g. 30-min) may not line up with the grid's 15-min cells one-to-one;
+  // a cell counts as "saved" if its own [start, start+15) falls within any
+  // saved [range start, range end).
+  const savedAt = useMemo(() => {
+    const set = new Set<string>()
+    // 🔴 g.data.ranges is ALWAYS non-empty — it's the default 10:00-18:00
+    // window when nothing is custom-saved (see availabilityApi.get's own
+    // docstring). Gating on `custom` here is load-bearing: without it, every
+    // slot in the default window would render as "already saved" even when
+    // NOTHING has actually been saved yet, which is exactly the bug this
+    // whole rewrite exists to fix.
+    if (!g.data?.custom) return set
+    const ranges = g.data.ranges
+    for (const cell of grid) {
+      // The key's OWN "HH:MM" substring, not a re-derived Date — reading
+      // hour/minute back off a constructed IST-naive Date via .getHours()
+      // would read the BROWSER's local clock, not IST (same trap
+      // format.ts's "ONE RULE" warns about); the string already has the
+      // exact digits we need.
+      const [ch, cm] = cell.key.slice(11, 16).split(':').map(Number)
+      const cellMin = ch * 60 + cm
+      for (const r of ranges) {
+        const [sh, sm] = r.start.split(':').map(Number)
+        const [eh, em] = r.end.split(':').map(Number)
+        if (cellMin >= sh * 60 + sm && cellMin < eh * 60 + em) {
+          set.add(cell.key)
+          break
+        }
+      }
+    }
+    return set
+  }, [grid, g.data])
 
   const isToday = dateKey === istDateKey(istNow())
   const isPast = (key: string) => {
@@ -96,7 +150,7 @@ export function AvailabilityTab({ dateKey }: {
   // a different one.
   useEffect(() => { setSelected(new Set()); setSaveError(null) }, [dateKey])
 
-  const selectable = (key: string) => freeStarts.has(key) && !isPast(key)
+  const selectable = (key: string) => freeStarts.has(key) && !isPast(key) && !savedAt.has(key)
 
   const toggleRange = (fromKey: string, toKey: string) => {
     const i0 = grid.findIndex(cell => cell.key === fromKey)
@@ -142,9 +196,6 @@ export function AvailabilityTab({ dateKey }: {
     try {
       await availabilityApi.set(dateKey, ranges)
       setSelected(new Set())
-      // Both calls must refresh — set-availability changed what the RANGES
-      // are (g) and, downstream, which slots are free within them (a).
-      a.reload()
       g.reload()
     } catch (e) {
       setSaveError(e instanceof ApiError ? e.message : 'Could not save availability.')
@@ -153,10 +204,9 @@ export function AvailabilityTab({ dateKey }: {
     }
   }
 
-  if ((a.loading && !a.data) || (g.loading && !g.data)) return <Skeleton rows={4} />
-  const loadError = a.error ?? g.error
-  if (loadError && !a.data && !g.data) {
-    return <ErrorState error={loadError} onRetry={() => { a.reload(); g.reload() }} />
+  if (g.loading && !g.data) return <Skeleton rows={4} />
+  if (g.error && !g.data) {
+    return <ErrorState error={g.error} onRetry={g.reload} />
   }
 
   const selectedCount = selected.size
@@ -166,10 +216,9 @@ export function AvailabilityTab({ dateKey }: {
         <div>
           <div className="text-sm font-semibold">Availability</div>
           <div className="text-xs" style={{ color: 'var(--text-subtle)' }}>
-            {g.data?.custom
-              ? 'Custom hours for this date'
-              : `${timeLabel(setHour(dateKey, DEFAULT_WORK_START_HOUR))} – ` +
-                `${timeLabel(setHour(dateKey, DEFAULT_WORK_END_HOUR))} IST · default hours`}
+            {`${timeLabel(setHour(dateKey, DEFAULT_WORK_START_HOUR))} – ` +
+              `${timeLabel(setHour(dateKey, DEFAULT_WORK_END_HOUR))} IST`}
+            {g.data?.custom && ` · ${g.data.ranges.length} range${g.data.ranges.length === 1 ? '' : 's'} saved`}
           </div>
         </div>
         {selectedCount > 0 && (
@@ -216,13 +265,19 @@ export function AvailabilityTab({ dateKey }: {
           {grid.map(slot => {
             const isFree = freeStarts.has(slot.key)
             const past = isPast(slot.key)
+            const saved = savedAt.has(slot.key)
             const isSelected = selected.has(slot.key)
-            // Three real states, mutually exclusive: PAST wins over BOOKED —
-            // a slot that has both already happened AND was never free is
-            // still shown as "past" (no action), because "booked" implies
-            // there is something to look at, and a gone time is not that.
-            const state: 'past' | 'booked' | 'free' =
-              past ? 'past' : isFree ? 'free' : 'booked'
+            // Four states, mutually exclusive, checked in this priority
+            // order: PAST wins over everything — a slot that already
+            // happened is never actionable regardless of what else is true
+            // about it. Then SAVED — already locked in by an earlier Save,
+            // shown distinctly from a real meeting so it never reads as
+            // "someone else took this", but still not re-selectable (saving
+            // the same minute twice would try to re-add an overlapping
+            // range and the backend would reject it). Then BOOKED (a real
+            // meeting) vs FREE (open, and clickable to start a new range).
+            const state: 'past' | 'saved' | 'booked' | 'free' =
+              past ? 'past' : saved ? 'saved' : isFree ? 'free' : 'booked'
             const clickable = state === 'free'
             return (
               <button
@@ -242,15 +297,22 @@ export function AvailabilityTab({ dateKey }: {
                   ? (isSelected
                       ? { background: '#15803D', color: '#fff' }
                       : { background: 'rgba(34,197,94,.13)', color: '#15803D' })
-                  : state === 'booked'
-                    // Same red as TONES.overdue/blocked elsewhere in this app,
-                    // plus a strikethrough — "already booked" must read as
-                    // clearly blocked, not merely inactive.
-                    ? { background: 'rgba(239,68,68,.12)', color: '#DC2626' }
-                    // PAST: grey, no strikethrough — a gone time is not an
-                    // error state, just nothing to act on any more.
-                    : { background: 'var(--bg-sunken)', color: 'var(--text-subtle)', opacity: .6 }}
-                title={state === 'free' ? 'Available' : state === 'booked' ? 'Already booked' : 'Already passed'}
+                  : state === 'saved'
+                    // Blue — distinct from both green/free (this is already
+                    // committed, not just open) and red/booked (this is a
+                    // deliberate choice the person made, not a meeting
+                    // blocking them).
+                    ? { background: 'rgba(59,130,246,.14)', color: '#3B82F6' }
+                    : state === 'booked'
+                      // Same red as TONES.overdue/blocked elsewhere in this
+                      // app, plus a strikethrough — "already booked" must
+                      // read as clearly blocked, not merely inactive.
+                      ? { background: 'rgba(239,68,68,.12)', color: '#DC2626' }
+                      // PAST: grey, no strikethrough — a gone time is not an
+                      // error state, just nothing to act on any more.
+                      : { background: 'var(--bg-sunken)', color: 'var(--text-subtle)', opacity: .6 }}
+                title={state === 'free' ? 'Available' : state === 'saved' ? 'Already set as available'
+                  : state === 'booked' ? 'Already booked' : 'Already passed'}
               >
                 {slot.label}
               </button>
@@ -267,6 +329,10 @@ export function AvailabilityTab({ dateKey }: {
         <span className="flex items-center gap-1.5">
           <span className="size-2.5 rounded" style={{ background: '#15803D' }} />
           Selected
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="size-2.5 rounded" style={{ background: 'rgba(59,130,246,.14)' }} />
+          Saved
         </span>
         <span className="flex items-center gap-1.5">
           <span className="size-2.5 rounded" style={{ background: 'rgba(239,68,68,.12)' }} />
@@ -300,41 +366,29 @@ function setHour(dateKey: string, hour: number): Date {
 }
 
 /**
- * Every slot in the day's bookable window(s), labelled for display.
- *
- * Built from `savedRanges` when the caller has them (each range's own
- * chosen interval reproduced exactly), or the backend's hardcoded default
- * window otherwise — a day with ZERO free slots (everything booked) still
- * renders its full configured grid, distinguishing "fully booked" from
- * "nothing configured", which sourcing cells directly from the API's
- * `slots` list could not do (an all-booked day would return an empty list
- * either way).
+ * Every slot in the day's DEFAULT bookable window, labelled for display —
+ * always this shape, regardless of what's already saved for the date (see
+ * the component docstring). Saved ranges are overlaid separately via
+ * `savedAt`, not used to change what this grid covers, so a person can
+ * always select more time within normal hours across multiple Saves.
  *
  * The DEFAULT constants mirror the backend's own (_WORK_START_HOUR=10,
  * _WORK_END_HOUR=18, _SLOT_MINUTES=15 in services/internal_api_router.py) —
  * kept in sync by hand since the frontend has no way to ask the backend
  * "what are your default hours" as data yet.
  */
-function buildDayGrid(
-  dateKey: string,
-  savedRanges: { start: string; end: string; slot_minutes: number }[] | null,
-): { key: string; label: string }[] {
+function buildDayGrid(dateKey: string): { key: string; label: string }[] {
   const [y, mo, d] = dateKey.split('-').map(Number)
   const pad = (n: number) => String(n).padStart(2, '0')
 
-  const windows = savedRanges && savedRanges.length > 0
-    ? savedRanges.map(r => {
-        const [sh, sm] = r.start.split(':').map(Number)
-        const [eh, em] = r.end.split(':').map(Number)
-        return { startMin: sh * 60 + sm, endMin: eh * 60 + em, slotMinutes: r.slot_minutes }
-      })
-    : [{ startMin: DEFAULT_WORK_START_HOUR * 60, endMin: DEFAULT_WORK_END_HOUR * 60,
-        slotMinutes: DEFAULT_SLOT_MINUTES }]
+  const startMin = DEFAULT_WORK_START_HOUR * 60
+  const endMin = DEFAULT_WORK_END_HOUR * 60
+  const slotMinutes = DEFAULT_SLOT_MINUTES
 
   const out: { key: string; label: string }[] = []
-  for (const w of windows) {
-    let minutesFromMidnight = w.startMin
-    while (minutesFromMidnight + w.slotMinutes <= w.endMin) {
+  {
+    let minutesFromMidnight = startMin
+    while (minutesFromMidnight + slotMinutes <= endMin) {
       const h = Math.floor(minutesFromMidnight / 60)
       const m = minutesFromMidnight % 60
       const key = `${y}-${pad(mo)}-${pad(d)}T${pad(h)}:${pad(m)}:00`
@@ -345,7 +399,7 @@ function buildDayGrid(
       // format.ts's own "ONE RULE".
       const label = timeLabel(parseIstNaive(key)!)
       out.push({ key, label })
-      minutesFromMidnight += w.slotMinutes
+      minutesFromMidnight += slotMinutes
     }
   }
   return out

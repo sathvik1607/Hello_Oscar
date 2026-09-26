@@ -295,7 +295,9 @@ export function CalendarScreen({ target }: {
         ))}
       </div>
 
-      {dayView === 'availability' && <AvailabilityTab dateKey={selectedKey} />}
+      {dayView === 'availability' && (
+        <AvailabilityTab dateKey={selectedKey} meetings={m.data?.meetings ?? []} />
+      )}
 
       {dayView === 'agenda' && <>
       {loading && <Skeleton rows={3} />}
