@@ -65,8 +65,13 @@ export const isActive = (t: Task) =>
  * the timed run and imply a late-evening commitment nobody made. As their own group
  * the list says the honest thing: some time that day, no particular hour.
  *
- * Ties break on id so a list does not reshuffle between refetches — visible
- * reordering reads as data changing when nothing has.
+ * Within the anytime group, NEWEST FIRST (highest id) — the thing you just added
+ * (a Goal you just created, a task you just noted with no time) is what you expect
+ * to see at the top of that pile, not buried under everything already there.
+ * Ids, not created_at: ids come from one database and cannot disagree about which
+ * row is newer, while created_at can tie and mixes UTC/IST conventions across
+ * tables (see CLAUDE.md's own "never paginate by created_at" rule) — id is both
+ * the correct ordering AND what keeps ties from reshuffling between refetches.
  *
  * 🔴 EXPORTED, and covers TWO shapes, not just is_all_day: a Goal has due_at ===
  * null without ever being flagged is_all_day (that flag is for an ordinary task
@@ -81,7 +86,7 @@ export const isAnytime = (t: Task) => !!t.is_all_day || t.due_at == null
 
 export function byDueAsc(a: Task, b: Task): number {
   if (isAnytime(a) !== isAnytime(b)) return isAnytime(a) ? 1 : -1
-  if (isAnytime(a) && isAnytime(b)) return a.id - b.id
+  if (isAnytime(a) && isAnytime(b)) return b.id - a.id
 
   const da = parseIstNaive(a.due_at)?.getTime()
   const db = parseIstNaive(b.due_at)?.getTime()
