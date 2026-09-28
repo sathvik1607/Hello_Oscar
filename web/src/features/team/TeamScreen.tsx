@@ -183,11 +183,21 @@ export function TeamScreen() {
      *
      * Scoped by the IST calendar day (istDateKey, the same basis as the
      * grouping below), so a task at 23:30 stays on its own date rather than
-     * being pushed over by the browser's offset. Undated tasks fall out here as
-     * well — the grouping was already dropping them, and a task with no date
-     * cannot belong to whichever day is picked.
+     * being pushed over by the browser's offset.
+     *
+     * 🔴 A GOAL (due_at === null) IS THE EXCEPTION, and it is a real one, not a
+     * client-side guess: a Goal never gets a due_at at all (BRD P0.4 — "a Goal
+     * carries no deadline, only its tasks do"), so excluding every undated row
+     * made a Goal structurally invisible on THIS screen on every date it could
+     * ever be picked — confirmed live, 2026-09-28, with a real Goal ("Oscarep")
+     * that never appeared under any day. Matches the same fix in
+     * buckets.ts::todayTimeline, so Today and this screen agree on what "no
+     * date" means. An ordinary undated TASK (not a Goal) is comparatively rare
+     * and is still reachable via Tasks/the member's own list — this exception
+     * exists for Goals, which have no other day-scoped home at all.
      */
     const scoped = raw.filter(t => {
+      if (t.due_at == null) return true
       const at = parseIstNaive(t.due_at)
       return !!at && istDateKey(at) === day
     })

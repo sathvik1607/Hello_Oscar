@@ -67,8 +67,17 @@ export const isActive = (t: Task) =>
  *
  * Ties break on id so a list does not reshuffle between refetches — visible
  * reordering reads as data changing when nothing has.
+ *
+ * 🔴 EXPORTED, and covers TWO shapes, not just is_all_day: a Goal has due_at ===
+ * null without ever being flagged is_all_day (that flag is for an ordinary task
+ * whose time was never set to a specific hour; a Goal simply never gets a due_at
+ * at all — BRD P0.4). Both belong in the same "no particular hour" treatment,
+ * here and in every other screen that groups by anytime-vs-timed (see
+ * TodayScreen.tsx's own isAnytime, which mirrors this) — kept as one exported
+ * definition so the three call sites (this sort, Today's grouping, Team's day
+ * filter) cannot drift apart on what "anytime" means again.
  */
-const isAnytime = (t: Task) => !!t.is_all_day
+export const isAnytime = (t: Task) => !!t.is_all_day || t.due_at == null
 
 export function byDueAsc(a: Task, b: Task): number {
   if (isAnytime(a) !== isAnytime(b)) return isAnytime(a) ? 1 : -1
@@ -146,6 +155,20 @@ export function todayTimeline(tasks: Task[], dayKey?: string): Task[] {
       //
       // Timed tasks are unaffected: still today-only, still chronological.
       if (t.is_all_day) return true
+
+      // 🔴 A GOAL (or any task with a genuinely NULL due_at) is a THIRD case,
+      // distinct from is_all_day — is_all_day is an explicit flag a task carries;
+      // a Goal simply never gets a due_at in the first place (BRD P0.4: "a Goal
+      // carries no deadline, only its tasks do" — see create_task's own is_goal
+      // branch, agent.py). Before this fix a Goal matched NEITHER is_all_day
+      // (false) NOR the due-date check below (due_at is null, so `due` is null)
+      // and fell out of every day-scoped screen on EVERY date, permanently —
+      // confirmed live, 2026-09-28: a Goal ("Oscarep") and its own real,
+      // correctly-dated sub-task were both invisible on Today and on the Team
+      // "Everyone" workspace view, the two screens meant to surface exactly this
+      // kind of work. Treated the same as an anytime task: it has nowhere on a
+      // clock to go, so it belongs in the "whenever" pile, not silently nowhere.
+      if (t.due_at == null) return true
 
       const due = parseIstNaive(t.due_at)
       return t.status === 'in_progress' || (!!due && istDateKey(due) === target)

@@ -7,7 +7,7 @@ import { ITEM_CACHES, ITEM_FRAMES, useLiveData } from '../../lib/useLiveData'
 import {
   dueLabel,  istNow, parseIstNaive, timeLabel, isReallyOverdue, istDateKey, dayLabel} from '../../lib/format'
 import type { Meeting, Task } from '../../lib/types'
-import { todayTimeline } from '../tasks/buckets'
+import { isAnytime, todayTimeline } from '../tasks/buckets'
 import { TaskCard } from '../tasks/TaskCard'
 import { TimelineEditor } from '../tasks/TimelineEditor'
 import { useTaskActions } from '../tasks/useTaskActions'
@@ -154,8 +154,8 @@ export function TodayScreen() {
    * Both keep their existing order (byDueAsc already sorts anytime last, so the
    * split is a partition of an already-correct list, not a re-sort).
    */
-  const timed = useMemo(() => timeline.filter(x => !x.is_all_day), [timeline])
-  const anytime = useMemo(() => timeline.filter(x => x.is_all_day), [timeline])
+  const timed = useMemo(() => timeline.filter(x => !isAnytime(x)), [timeline])
+  const anytime = useMemo(() => timeline.filter(isAnytime), [timeline])
 
   /**
    * The rows actually rendered, after the pill filter.
@@ -168,7 +168,7 @@ export function TodayScreen() {
     pick === null ? true
     : pick === 'overdue' ? isReallyOverdue(t)
     : pick === 'critical' ? (t.priority === 'critical' || t.priority === 'high')
-    : pick === 'anytime' ? !!t.is_all_day
+    : pick === 'anytime' ? isAnytime(t)
     : t.status === 'completed'
 
   const shownTimed = useMemo(
