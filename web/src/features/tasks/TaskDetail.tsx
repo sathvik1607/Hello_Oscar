@@ -9,7 +9,7 @@ import { getUser } from '../../lib/session'
 import { dueLabel, messageTime, parseIstNaive, relative, isReallyOverdue } from '../../lib/format'
 import type { CommentAttachment, Task, TaskTreeNode } from '../../lib/types'
 import { CommentComposer, CommentList, useCommentThread } from './CommentThread'
-import { AttachmentChip } from './AttachmentChip'
+import { AttachmentChip, _openViewerCount } from './AttachmentChip'
 import { NewTaskSheet } from './NewTaskSheet'
 import {
   Badge, Button, IconButton, Portal, STATUS_LABEL, cx, Linkify} from '../../ui'
@@ -123,7 +123,21 @@ export function TaskDetail({ task, onClose, onChanged, inline, onEditStart,
   }, [focusThread, thread.loading])
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      // A layer on TOP of this sheet (the attachment viewer) may have already
+      // claimed this Escape via preventDefault() — see AttachmentChip's own
+      // comment for why stopPropagation doesn't work between two independent
+      // window-level listeners here. Skipping in that case is what makes one
+      // Escape close only the front-most layer, landing back on this sheet
+      // instead of skipping past it to the list.
+      // A file preview (AttachmentViewer) may be open on TOP of this sheet —
+      // see AttachmentChip's _openViewerCount comment for why this reads a
+      // shared counter instead of stopPropagation/preventDefault. Skipping in
+      // that case is what makes one Escape close only the front-most layer.
+      if (_openViewerCount > 0) return
+      onClose()
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])

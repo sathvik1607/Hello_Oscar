@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  ExternalLink, FileSpreadsheet, FileText, File as FileIcon, Image as ImageIcon,
-  Loader2, X,
+  Download, ExternalLink, FileSpreadsheet, FileText, File as FileIcon,
+  Image as ImageIcon, Loader2, X,
 } from 'lucide-react'
-import { ApiError, attachmentHref, thumbHref } from '../../lib/api'
+import { ApiError, attachmentBlob, attachmentHref, attachmentText, thumbHref } from '../../lib/api'
 import { bytes } from '../../lib/format'
 import type { CommentAttachment } from '../../lib/types'
 import { Portal } from '../../ui'
+
+/** How many AttachmentViewer instances are currently mounted — read by
+ *  TaskDetail's own Escape handler so one Escape closes only the FRONT-MOST
+ *  layer (the file preview) rather than both it and the task sheet underneath
+ *  at once. See AttachmentViewer's own Escape-handling comment for why this
+ *  exists instead of stopPropagation/preventDefault between the two
+ *  independent window-level listeners. */
+export let _openViewerCount = 0
 
 /**
  * A file on a comment. Mirrors the Flutter `AttachmentChip` and its entity rules,
@@ -72,6 +80,42 @@ export function AttachmentChip({ attachment: a, onRemove }: {
   const closeViewer = useCallback(() => {
     setViewer(v => { v?.revoke?.(); return null })
   }, [])
+
+  const [downloading, setDownloading] = useState(false)
+
+  /**
+   * One click, saves under the ORIGINAL uploaded filename — no rename prompt.
+   * The browser's own Save-As dialog already lets someone pick a different
+   * name at save time, which is the standard way to rename a download; a
+   * custom rename step here would add a modal in front of EVERY download to
+   * serve the rare case instead of the common one.
+   *
+   * Uses attachmentBlob, NOT attachmentHref — attachmentHref takes the
+   * direct_url shortcut when one exists (the common case for task
+   * attachments, which are public), and the `download` attribute is IGNORED
+   * by every browser on that cross-origin S3 link, so the save would fall
+   * back to the random uuid-based storage key as the filename instead of the
+   * real one. attachmentBlob always fetches real bytes into a same-origin
+   * blob: URL, where `download` reliably works.
+   */
+  const download = useCallback(async () => {
+    if (downloading) return
+    setDownloading(true); setErr(null)
+    try {
+      const r = await attachmentBlob(a)
+      const link = document.createElement('a')
+      link.href = r.href
+      link.download = a.file_name ?? 'download'
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      r.revoke()
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'Could not download that file.')
+    } finally {
+      setDownloading(false)
+    }
+  }, [a, downloading])
 
   // "4 pages · PDF · 719 KB" — each part dropped when unknown, so a backend that
   // reports no page count reads correctly instead of showing "null pages".
@@ -139,6 +183,18 @@ export function AttachmentChip({ attachment: a, onRemove }: {
               </span>
             )}
           </button>
+          {/* Not shown while onRemove is present — that's the composer's staged-
+              file state, before the comment is posted, and there is nothing on
+              the server yet to download. */}
+          {!onRemove && (
+            <button onClick={() => void download()} disabled={downloading}
+                    aria-label={`Download ${a.file_name ?? 'file'}`}
+                    className="grid size-6 shrink-0 place-items-center rounded-md"
+                    style={{ color: 'var(--text-subtle)' }}>
+              {downloading ? <Loader2 className="size-3.5 animate-spin" />
+                           : <Download className="size-3.5" />}
+            </button>
+          )}
           {onRemove && (
             <button onClick={onRemove} aria-label={`Remove ${a.file_name ?? 'file'}`}
                     className="grid size-6 shrink-0 place-items-center rounded-md"
@@ -167,6 +223,23 @@ function AttachmentViewer({ attachment: a, href, onClose }: {
 }) {
   // Esc closes it — the keyboard equivalent of the × for anyone not reaching
   // for the mouse, and the behaviour every native viewer already has.
+  //
+  // 🔴 Registers into the shared `_openViewerCount` below, which TaskDetail's
+  // OWN Escape handler checks before closing itself. Two independent
+  // `window.addEventListener('keydown', …)` calls on the same target (this
+  // one and TaskDetail's, since this viewer opens ON TOP of the task sheet)
+  // fire in REGISTRATION order for ONE keypress, and TaskDetail mounted first
+  // — confirmed live via a console trace: neither `capture: true` nor
+  // `e.preventDefault()`/`e.stopPropagation()` can reorder or be checked
+  // reliably across two listeners on the SAME target when the one that needs
+  // to act SECOND (TaskDetail, checking a flag) runs FIRST in wall-clock time.
+  // A shared counter sidesteps the ordering problem entirely: TaskDetail reads
+  // a plain value instead of inferring "is a viewer open" from event timing.
+  useEffect(() => {
+    _openViewerCount++
+    return () => { _openViewerCount-- }
+  }, [])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
@@ -174,11 +247,18 @@ function AttachmentViewer({ attachment: a, href, onClose }: {
   }, [onClose])
 
   const isPdf = a.mime_type.includes('pdf')
-  // Neither an image nor a PDF has a reliable in-browser preview (Office/CSV
-  // formats render via whatever's installed locally, not the browser itself),
-  // so the modal still opens for these — same close button, same place — but
-  // its body is a single external-open action instead of an embedded preview.
-  const previewable = a.is_image || isPdf
+  // CSV is plain text — unlike Excel/Word/PPT, no binary format to decode, so a
+  // real table render is cheap and worth it. Matched on mime type AND the file
+  // extension: some browsers/OSes hand a CSV upload a generic
+  // application/vnd.ms-excel mime type, which the extension disambiguates.
+  const isCsv = a.mime_type.includes('csv') ||
+    (a.file_name ?? '').toLowerCase().endsWith('.csv')
+  // Neither an image, a PDF, nor CSV has a reliable in-browser preview for the
+  // REST of Office/document formats (Excel/Word/PPT render via whatever's
+  // installed locally, not the browser itself), so the modal still opens for
+  // those — same close button, same place — but its body is a single
+  // external-open action instead of an embedded preview.
+  const previewable = a.is_image || isPdf || isCsv
 
   return (
     <Portal>
@@ -210,6 +290,7 @@ function AttachmentViewer({ attachment: a, href, onClose }: {
             <iframe src={href} title={a.file_name ?? 'PDF'}
                     className="h-full w-full rounded-lg border-0 bg-white" />
           )}
+          {!a.is_image && !isPdf && isCsv && <CsvTable attachment={a} />}
           {!previewable && (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
               <p className="text-[13px]" style={{ color: 'rgba(255,255,255,.75)' }}>
@@ -225,6 +306,127 @@ function AttachmentViewer({ attachment: a, href, onClose }: {
         </div>
       </div>
     </Portal>
+  )
+}
+
+/** Row count above which the table shows a truncation note rather than
+ *  rendering every row — the point where a real spreadsheet import (thousands
+ *  of rows) would otherwise freeze the tab laying out one giant DOM table for
+ *  a document nobody is going to read cell-by-cell in a modal anyway. */
+const _CSV_MAX_ROWS = 500
+
+/**
+ * A minimal but CORRECT CSV parser — handles quoted fields (so a comma or a
+ * newline INSIDE a quoted value doesn't split the row wrong) and "" as an
+ * escaped quote inside a quoted field, per the format every spreadsheet
+ * export actually uses. A naive `line.split(',')` looks fine on a toy example
+ * and silently misparses the first real export with a quoted address or note
+ * field containing a comma.
+ */
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = []
+  let row: string[] = []
+  let field = ''
+  let inQuotes = false
+  let i = 0
+  while (i < text.length) {
+    const c = text[i]
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i += 2; continue }
+        inQuotes = false; i++; continue
+      }
+      field += c; i++; continue
+    }
+    if (c === '"') { inQuotes = true; i++; continue }
+    if (c === ',') { row.push(field); field = ''; i++; continue }
+    if (c === '\r') { i++; continue } // normalize CRLF — the \n below ends the row
+    if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; i++; continue }
+    field += c; i++
+  }
+  // Trailing field/row with no final newline — the common case for a file
+  // that doesn't end with a blank line.
+  if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row) }
+  return rows
+}
+
+/** Fetches and renders a CSV's actual content as a table, inside the existing
+ *  attachment viewer modal. Goes through attachmentText — NOT the href already
+ *  resolved for the image/PDF branches, which may be a direct S3 link with no
+ *  CORS policy for fetch() (see attachmentText's own comment). */
+function CsvTable({ attachment: a }: { attachment: CommentAttachment }) {
+  const [state, setState] = useState<
+    { rows: string[][] } | { error: string } | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    attachmentText(a).then(text => {
+      if (!alive) return
+      const rows = parseCsv(text).filter(r => r.some(cell => cell.trim() !== ''))
+      setState({ rows })
+    }).catch(() => { if (alive) setState({ error: 'Could not read this file.' }) })
+    return () => { alive = false }
+  }, [a])
+
+  if (!state) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Loader2 className="size-5 animate-spin" style={{ color: 'rgba(255,255,255,.6)' }} />
+      </div>
+    )
+  }
+  if ('error' in state) {
+    return (
+      <p className="p-4 text-center text-[13px]" style={{ color: 'rgba(255,255,255,.75)' }}>
+        {state.error}
+      </p>
+    )
+  }
+  if (state.rows.length === 0) {
+    return (
+      <p className="p-4 text-center text-[13px]" style={{ color: 'rgba(255,255,255,.75)' }}>
+        This file is empty.
+      </p>
+    )
+  }
+
+  const [header, ...body] = state.rows
+  const truncated = body.length > _CSV_MAX_ROWS
+  const shown = truncated ? body.slice(0, _CSV_MAX_ROWS) : body
+
+  return (
+    <div className="rounded-lg" style={{ background: '#fff' }}>
+      <table className="w-full border-collapse text-[12px]">
+        <thead>
+          <tr>
+            {header.map((cell, i) => (
+              <th key={i}
+                  className="sticky top-0 whitespace-nowrap border-b-2 px-3 py-2 text-left font-bold"
+                  style={{ background: '#e5e7eb', borderColor: '#9ca3af', color: '#111827' }}>
+                {cell}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {shown.map((r, ri) => (
+            <tr key={ri}>
+              {r.map((cell, ci) => (
+                <td key={ci} className="whitespace-nowrap border-b px-3 py-1.5"
+                    style={{ borderColor: '#e5e7eb', color: '#1f2937' }}>
+                  {cell}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {truncated && (
+        <p className="px-3 py-2 text-[12px]" style={{ color: '#6b7280' }}>
+          Showing the first {_CSV_MAX_ROWS} of {body.length} rows — open in a new tab for the rest.
+        </p>
+      )}
+    </div>
   )
 }
 

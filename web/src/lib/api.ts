@@ -139,6 +139,63 @@ export async function attachmentHref(a: {
   return { href, revoke: () => URL.revokeObjectURL(href) }
 }
 
+/**
+ * A blob URL for SAVING the file, always via `{a.url}/download` — never
+ * `direct_url`, and NOT the plain redirect route either.
+ *
+ * Two independent reasons neither of those works, both confirmed live:
+ *
+ *  · `direct_url` (what attachmentHref prefers): the `download` attribute on
+ *    an `<a>` is silently IGNORED for a CROSS-ORIGIN link (S3 is a different
+ *    origin), so the browser falls back to deriving a filename from the URL
+ *    itself — the random uuid-based storage key, not the real uploaded name.
+ *    Confirmed: a save landed as `ac9a2ddd9bbe456a9bd9dad4b017ef39.csv`.
+ *
+ *  · the plain `{a.url}` redirect route: it 302s to a presigned S3 URL, so
+ *    fetch() here would just follow the redirect INTO the same cross-origin
+ *    S3 request — which additionally has no CORS policy allowing a browser
+ *    fetch() to read it at all (only passive <img>/<iframe> tag loading works
+ *    against S3). Confirmed: "blocked by CORS policy: No
+ *    'Access-Control-Allow-Origin' header", the same wall attachmentText hits.
+ *
+ * `/download` reads the object SERVER-SIDE and streams the bytes back with
+ * Content-Disposition carrying the real name, from OUR OWN origin — which
+ * already has this web app's origins in CORS_ORIGINS for every other route.
+ * The resulting blob: URL is always same-origin, so `download` reliably wins.
+ */
+export async function attachmentBlob(a: { url: string }): Promise<{ href: string; revoke: () => void }> {
+  const res = await fetch(`${getBase()}${a.url}/download?user_id=${requireUserId()}`, {
+    headers: { Authorization: `Bearer ${getToken() ?? ''}` },
+  })
+  if (!res.ok) throw new ApiError(res.status, `Could not download that file (${res.status}).`)
+  const blob = await res.blob()
+  const href = URL.createObjectURL(blob)
+  return { href, revoke: () => URL.revokeObjectURL(href) }
+}
+
+/**
+ * The file's TEXT content (CSV preview only) — hits `{a.url}/text`, a DIFFERENT
+ * backend route from attachmentHref's, and never `direct_url`.
+ *
+ * `attachmentHref`'s own route (`GET /tasks/attachments/{id}`) 302-redirects to
+ * a presigned S3 URL — so even going through it, the browser's fetch() ends up
+ * reading from S3 directly, which has no CORS policy allowing that (only
+ * <img>/<iframe> tag loading works against it; that's passive display, not a
+ * content read). Confirmed live: every attempt failed "blocked by CORS policy:
+ * No 'Access-Control-Allow-Origin' header".
+ *
+ * The `/text` route reads the object SERVER-SIDE and returns the bytes directly
+ * from our own origin — which already has this web app's origins in
+ * CORS_ORIGINS for every other route, so a plain fetch() here just works.
+ */
+export async function attachmentText(a: { url: string }): Promise<string> {
+  const res = await fetch(`${getBase()}${a.url}/text?user_id=${requireUserId()}`, {
+    headers: { Authorization: `Bearer ${getToken() ?? ''}` },
+  })
+  if (!res.ok) throw new ApiError(res.status, `Could not read that file (${res.status}).`)
+  return res.text()
+}
+
 /** Same rule for a thumbnail: the direct link or nothing. A thumbnail is decoration,
  *  so it is not worth an authenticated round trip and a blob per row. */
 export const thumbHref = (a: { thumbnail_direct_url: string | null }) =>
