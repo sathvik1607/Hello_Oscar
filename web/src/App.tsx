@@ -1,11 +1,13 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { applyTheme, isSignedIn, onSessionChange } from './lib/session'
+import { registerPushToken, usePushSound } from './lib/push'
 import { reset as resetSocket } from './lib/appSocket'
-import { notifyActivityOpened, useUnreadCount } from './lib/unread'
+import { useUnreadCount } from './lib/unread'
 import { AppShell } from './shell/AppShell'
 import type { SectionId } from './shell/nav'
 import { SECTION_IDS } from './shell/nav'
 import { AuthScreen } from './features/auth/AuthScreen'
+import { NotificationToasts } from './features/notifications/NotificationToasts'
 import { TodayScreen } from './features/today/TodayScreen'
 import { VoiceProvider } from './features/voice/VoiceProvider'
 import { Spinner } from './ui'
@@ -103,6 +105,15 @@ export default function App() {
   // real section immediately instead of showing Today and then correcting itself.
   const [section, setSection] = useState<SectionId>(
     () => adoptLegacyHash() ?? sectionFromPath())
+
+  // A RELOAD with an existing session never calls signIn() again — that only fires
+  // from the login form — so a returning user needs this separate mount-time check.
+  // AuthScreen's own call after signIn() handles the fresh-login case; this one
+  // handles "already signed in when the tab opened". Browsers don't re-prompt for
+  // a permission already granted, so this is cheap and idempotent on every boot.
+  useEffect(() => {
+    if (isSignedIn()) void registerPushToken()
+  }, [])
 
   // Theme before anything paints, so there is no flash of the wrong one.
   useEffect(() => {
@@ -202,11 +213,9 @@ export default function App() {
     history.pushState(null, '', `/${s}`)
     setSection(s)
     setTarget(t ?? null)
-    // Opening Activity is the "I have seen these" signal for the badge. Fired from
-    // the navigation itself rather than from a URL listener: `hashchange` never
-    // fired when the hash was set to the value it already held, so re-opening
-    // Activity left the badge up. See lib/unread.ts.
-    if (s === 'notifications') notifyActivityOpened()
+    // The badge decrements per-row-read now (lib/unread.ts's notifyOneRead), not
+    // on opening Activity — merely opening the list must not silently mark
+    // everything read with nothing actually clicked.
     // Sections are separate pages conceptually; landing halfway down the previous
     // one's scroll position reads as a rendering bug. Skipped when deep-linking:
     // the destination is about to scroll to the item itself.
@@ -233,6 +242,7 @@ export default function App() {
   return (
     <VoiceProvider>
       <LiveTitle />
+      <NotificationToasts onNavigate={navigate} />
       <AppShell section={section} onNavigate={navigate}>
         {/* 🔴 Inside Suspense AND keyed on the section, so a crash on one screen
             does not permanently poison the others: navigating away remounts the
@@ -266,6 +276,7 @@ export default function App() {
  */
 function LiveTitle() {
   const unread = useUnreadCount()
+  usePushSound()
 
   useEffect(() => {
     const base = document.title.replace(/^\(\d+\)\s*/, '')

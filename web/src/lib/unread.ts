@@ -5,64 +5,76 @@ import { onRecovered, subscribe } from './appSocket'
 /**
  * How many unread notifications there are, live.
  *
- * ONE subscription for the whole app, held at the root. Counting inside the
- * Activity screen — which is where it started — means the badge only works while
- * you are looking at the badge.
+ * Both the COUNT and its single WS/read subscription live at module level,
+ * established exactly once (`_started`), not re-created per mount of the hook.
  *
- * Seeded from the server rather than counted from zero: notifications that arrived
- * while the tab was closed are already unread, and a badge that starts at 0 after
- * every reload is worse than no badge, because it actively says "nothing new".
+ * React 19 StrictMode mounts an effect twice in dev; with the subscription
+ * created fresh inside the hook's own effect, a fast navigation could leave a
+ * stale mount's `subscribe()`/notifyOneRead listener registered without its
+ * cleanup ever running (observed live: two live listeners simultaneously, no
+ * click in between), so a single `notification.created` frame or a single
+ * notifyOneRead() call fired twice — the badge silently jumped by 2 instead of
+ * 1. Doing the real subscribing ONCE, ever, for the life of the module removes
+ * the class of bug outright: the hook itself only ever reads/renders the
+ * module's count, never owns a subscription of its own.
  */
-/**
- * "Activity was opened" — called by App's navigate().
- *
- * 🔴 A SIGNAL, NOT A URL LISTENER, and that is a bug fix rather than a port.
- * This used to hang off `hashchange` and test `location.hash.includes('notifications')`,
- * which failed in two ways: `hashchange` does NOT fire when the hash is assigned the
- * value it already holds, so re-opening Activity from Activity left the badge up;
- * and `includes` is a substring test on a string the router does not own. The
- * navigation itself is the actual event, so it is the thing that should say so.
- *
- * A module-level set rather than a React context: the count lives in a hook mounted
- * once at the root, and threading a context through the shell for one boolean is
- * more moving parts than a subscription.
- */
-const _opened = new Set<() => void>()
+let _count = 0
+const _listeners = new Set<(n: number) => void>()
+let _started = false
 
-export function notifyActivityOpened(): void {
-  for (const fn of _opened) fn()
+function _setCount(n: number) {
+  _count = Math.max(0, n)
+  for (const fn of _listeners) fn(_count)
+}
+
+async function _seed() {
+  try {
+    const rows = await notifApi.list(true)
+    _setCount(rows.length)
+  } catch { /* a badge is not worth surfacing an error for */ }
+}
+
+/** Runs exactly once for the life of the module — the ONE real WS/read
+ *  subscription, regardless of how many times useUnreadCount mounts. */
+function _start() {
+  if (_started) return
+  _started = true
+  void _seed()
+  subscribe(f => {
+    if (f.type === 'notification.created') _setCount(_count + 1)
+  })
+  onRecovered(() => { void _seed() })
+}
+
+/** "One notification was marked read" — called by NotificationsScreen.open()
+ *  and NotificationToasts right after their own markRead(id) succeeds.
+ *
+ * 🔴 Deliberately NOT fired by merely opening/navigating to Activity — that used
+ * to hard-reset the badge to 0 the instant the screen mounted, before any row was
+ * actually read. Two unread items opened the list and both instantly vanished
+ * from the badge with nothing clicked — the badge stopped meaning "unread count"
+ * and became "have you glanced at the list". Decrementing per-row instead keeps
+ * the badge accurate to what has genuinely been read, one at a time. */
+export function notifyOneRead(): void {
+  _setCount(_count - 1)
+}
+
+/** "Mark all read" was clicked — the one case that DOES zero the badge outright,
+ *  because every row genuinely became read at once, not merely viewed. */
+export function notifyAllRead(): void {
+  _setCount(0)
 }
 
 export function useUnreadCount(): number {
-  const [n, setN] = useState(0)
+  // Lazy initializer reads _count at RENDER time, not react to it after commit
+  // — covers the same "module already changed before this mount" case a
+  // setN(_count) inside the effect would, without the extra render that causes.
+  const [n, setN] = useState(() => _count)
 
   useEffect(() => {
-    let alive = true
-    const seed = async () => {
-      try {
-        const rows = await notifApi.list(true)
-        if (alive) setN(rows.length)
-      } catch { /* a badge is not worth surfacing an error for */ }
-    }
-    void seed()
-
-    const unsubFrame = subscribe(f => {
-      if (f.type === 'notification.created') setN(c => c + 1)
-    })
-    // After a drop, the count is re-read rather than incremented — frames missed
-    // while offline were never delivered, so the local tally is simply wrong.
-    const unsubRecovery = onRecovered(() => { void seed() })
-
-    // Opening Activity is the natural "I have seen these" signal.
-    const onOpened = () => setN(0)
-    _opened.add(onOpened)
-
-    return () => {
-      alive = false
-      unsubFrame()
-      unsubRecovery()
-      _opened.delete(onOpened)
-    }
+    _start()
+    _listeners.add(setN)
+    return () => { _listeners.delete(setN) }
   }, [])
 
   return n

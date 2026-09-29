@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ArrowRight, KeyRound, Mail } from 'lucide-react'
 import { ApiError, auth } from '../../lib/api'
+import { registerPushToken } from '../../lib/push'
 import {
   baseIsLocked, getBase, markUpdatedReload, setBase, signIn, takeSignOutReason,
 } from '../../lib/session'
@@ -106,6 +107,9 @@ export function AuthScreen({ updated = false }: { updated?: boolean }) {
         return
       }
       signIn(r.token, r.user)
+      // Fire-and-forget: never block landing in the app on a permission prompt
+      // the user might dismiss, or a browser that doesn't support push at all.
+      void registerPushToken()
     } catch (e2) {
       const ae = e2 instanceof ApiError ? e2 : null
       setErr(

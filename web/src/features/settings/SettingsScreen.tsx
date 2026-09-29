@@ -8,6 +8,7 @@ import { watchConnection, type ConnState } from '../../lib/appSocket'
 import { VOICE_HINT, VOICE_OPTIONS } from '../../lib/speakers'
 import { useVoice } from '../voice/VoiceProvider'
 import { VOICE_TAP_LABEL, VOICE_HOTKEY_LABEL } from '../../lib/hotkeys'
+import { deactivatePushToken } from '../../lib/push'
 import {
   Badge, Button, Card, Field, SectionHeading, inputCls, inputStyle,
 } from '../../ui'
@@ -36,6 +37,12 @@ export function SettingsScreen() {
     applyTheme(t)
   }, [])
 
+  // deactivatePushToken() needs the bearer token, so it must run and settle
+  // BEFORE signOut() clears it — hence await here rather than firing both at once.
+  const handleSignOut = useCallback(() => {
+    void deactivatePushToken().finally(signOut)
+  }, [])
+
 
 
   return (
@@ -55,7 +62,7 @@ export function SettingsScreen() {
             <div className="text-[13px]" style={{ color: 'var(--text-muted)' }}>
               Signed in on this browser
             </div>
-            <Button size="sm" onClick={signOut}>Sign out</Button>
+            <Button size="sm" onClick={handleSignOut}>Sign out</Button>
           </div>
         </Card>
       </section>

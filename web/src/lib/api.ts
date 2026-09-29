@@ -612,3 +612,25 @@ export const assistant = {
 }
 
 export const health = () => request<{ status: string }>('/health')
+
+// ── device push tokens ───────────────────────────────────────────────────────
+
+export const devices = {
+  /** Register (or update) this browser's FCM token. Same endpoint the mobile app
+   *  uses — platform: "web" is a free-form string the backend already accepts with
+   *  no validation, so nothing server-side needed to change for this. */
+  register: (token: string) =>
+    request<unknown>('/devices/register', {
+      method: 'POST',
+      body: { user_id: requireUserId(), token, platform: 'web' },
+    }),
+
+  /** Deactivate this browser's token on explicit sign-out. Best-effort: called
+   *  before signOut() clears the bearer token (this call needs it), and its
+   *  failure must never block signing out. */
+  deactivate: (token: string) =>
+    request<unknown>('/devices/token', {
+      method: 'DELETE',
+      body: { user_id: requireUserId(), token },
+    }),
+}
