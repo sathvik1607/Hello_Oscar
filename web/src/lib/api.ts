@@ -174,6 +174,20 @@ export async function attachmentBlob(a: { url: string }): Promise<{ href: string
 }
 
 /**
+ * A plain URL (not a blob — for direct use in `<img src>`) whose LAST PATH
+ * SEGMENT is the real uploaded filename, unlike attachmentHref's `direct_url`
+ * (a permanent S3 link whose path is the random uuid-based storage key). A
+ * native browser "Save Image As" derives its suggested filename from exactly
+ * that path segment, so an image previewed via `direct_url` right-click-saves
+ * under gibberish. `/download` needs no Authorization header — like the
+ * existing redirect route, it authenticates via the `user_id` query param
+ * (WEB_AUTH_ENFORCE is off in production; see CLAUDE.md), so this can be used
+ * directly as a tag's `src` with no fetch/blob step at all.
+ */
+export const downloadHref = (a: { url: string }) =>
+  `${getBase()}${a.url}/download?user_id=${requireUserId()}`
+
+/**
  * The file's TEXT content (CSV preview only) — hits `{a.url}/text`, a DIFFERENT
  * backend route from attachmentHref's, and never `direct_url`.
  *

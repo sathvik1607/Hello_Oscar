@@ -3,7 +3,9 @@ import {
   Download, ExternalLink, FileSpreadsheet, FileText, File as FileIcon,
   Image as ImageIcon, Loader2, X,
 } from 'lucide-react'
-import { ApiError, attachmentBlob, attachmentHref, attachmentText, thumbHref } from '../../lib/api'
+import {
+  ApiError, attachmentBlob, attachmentHref, attachmentText, downloadHref, thumbHref,
+} from '../../lib/api'
 import { bytes } from '../../lib/format'
 import type { CommentAttachment } from '../../lib/types'
 import { Portal } from '../../ui'
@@ -282,8 +284,21 @@ function AttachmentViewer({ attachment: a, href, onClose }: {
                 className="absolute inset-0 -z-10 cursor-default" />
         <div className="min-h-0 flex-1 overflow-auto p-3 pt-0"
              onClick={e => e.stopPropagation()}>
+          {/* IMAGE ONLY uses downloadHref(a), NOT `href` — `href` is
+              attachmentHref's result, which for a public attachment (the
+              common case for task files) is the DIRECT S3 link. A native
+              right-click → "Save Image As" derives its suggested filename
+              from the URL's own path, and an S3 url's path is the random
+              uuid-based storage key, not the real uploaded name. Routing the
+              image itself through our own /download route means that native
+              save sees a URL whose path segment IS the real filename, and
+              also carries Content-Disposition confirming it. Confirmed live:
+              a right-click save on the S3-direct image landed as
+              `a31b2005d9954fe5bc17936ba7467c...`.
+              PDF is left on `href` (attachmentHref) — not reported as having
+              this problem. */}
           {a.is_image && (
-            <img src={href} alt={a.file_name ?? ''}
+            <img src={downloadHref(a)} alt={a.file_name ?? ''}
                  className="mx-auto block max-w-full" />
           )}
           {!a.is_image && isPdf && (
