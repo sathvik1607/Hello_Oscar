@@ -210,6 +210,24 @@ export async function attachmentText(a: { url: string }): Promise<string> {
   return res.text()
 }
 
+/**
+ * An xlsx attachment's first sheet, parsed SERVER-SIDE — hits `{a.url}/table`,
+ * distinct from `/text`. xlsx is a binary zip-based format, not plain text
+ * like a CSV, so the backend can't just hand back the raw bytes as
+ * `text/plain` the way `/text` does for CSV; it parses the sheet with
+ * openpyxl and returns `{sheet_name, rows}` already stringified.
+ *
+ * Same CORS reasoning as `attachmentText` above: reading via our own origin
+ * sidesteps S3 having no CORS policy for a browser fetch().
+ */
+export async function attachmentTable(a: { url: string }): Promise<{ sheet_name: string; rows: string[][] }> {
+  const res = await fetch(`${getBase()}${a.url}/table?user_id=${requireUserId()}`, {
+    headers: { Authorization: `Bearer ${getToken() ?? ''}` },
+  })
+  if (!res.ok) throw new ApiError(res.status, `Could not read that file (${res.status}).`)
+  return res.json()
+}
+
 /** Same rule for a thumbnail: the direct link or nothing. A thumbnail is decoration,
  *  so it is not worth an authenticated round trip and a blob per row. */
 export const thumbHref = (a: { thumbnail_direct_url: string | null }) =>

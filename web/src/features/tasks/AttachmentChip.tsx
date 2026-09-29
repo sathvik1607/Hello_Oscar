@@ -4,7 +4,7 @@ import {
   Image as ImageIcon, Loader2, X,
 } from 'lucide-react'
 import {
-  ApiError, attachmentBlob, attachmentHref, attachmentText, downloadHref, thumbHref,
+  ApiError, attachmentBlob, attachmentHref, attachmentTable, attachmentText, downloadHref, thumbHref,
 } from '../../lib/api'
 import { bytes } from '../../lib/format'
 import type { CommentAttachment } from '../../lib/types'
@@ -255,12 +255,20 @@ function AttachmentViewer({ attachment: a, href, onClose }: {
   // application/vnd.ms-excel mime type, which the extension disambiguates.
   const isCsv = a.mime_type.includes('csv') ||
     (a.file_name ?? '').toLowerCase().endsWith('.csv')
-  // Neither an image, a PDF, nor CSV has a reliable in-browser preview for the
-  // REST of Office/document formats (Excel/Word/PPT render via whatever's
-  // installed locally, not the browser itself), so the modal still opens for
-  // those — same close button, same place — but its body is a single
-  // external-open action instead of an embedded preview.
-  const previewable = a.is_image || isPdf || isCsv
+  // xlsx only — NOT legacy .xls. The backend's /table route parses with
+  // openpyxl, which can't read the old OLE-based .xls format, and returns a
+  // 400 for it (see main.py's preview_task_attachment_table). Matched on
+  // extension because a browser/OS can hand an .xlsx upload a generic
+  // application/vnd.ms-excel mime type — same ambiguity the CSV check
+  // disambiguates with its own extension fallback.
+  const isXlsx = (a.file_name ?? '').toLowerCase().endsWith('.xlsx') ||
+    a.mime_type.includes('spreadsheetml')
+  // Neither an image, a PDF, CSV, nor xlsx has a reliable in-browser preview
+  // for the REST of Office/document formats (Word/PPT/legacy .xls render via
+  // whatever's installed locally, not the browser itself), so the modal still
+  // opens for those — same close button, same place — but its body is a
+  // single external-open action instead of an embedded preview.
+  const previewable = a.is_image || isPdf || isCsv || isXlsx
 
   return (
     <Portal>
@@ -306,6 +314,7 @@ function AttachmentViewer({ attachment: a, href, onClose }: {
                     className="h-full w-full rounded-lg border-0 bg-white" />
           )}
           {!a.is_image && !isPdf && isCsv && <CsvTable attachment={a} />}
+          {!a.is_image && !isPdf && !isCsv && isXlsx && <XlsxTable attachment={a} />}
           {!previewable && (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
               <p className="text-[13px]" style={{ color: 'rgba(255,255,255,.75)' }}>
@@ -383,29 +392,65 @@ function CsvTable({ attachment: a }: { attachment: CommentAttachment }) {
     return () => { alive = false }
   }, [a])
 
-  if (!state) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <Loader2 className="size-5 animate-spin" style={{ color: 'rgba(255,255,255,.6)' }} />
-      </div>
-    )
-  }
-  if ('error' in state) {
-    return (
-      <p className="p-4 text-center text-[13px]" style={{ color: 'rgba(255,255,255,.75)' }}>
-        {state.error}
-      </p>
-    )
-  }
-  if (state.rows.length === 0) {
-    return (
-      <p className="p-4 text-center text-[13px]" style={{ color: 'rgba(255,255,255,.75)' }}>
-        This file is empty.
-      </p>
-    )
-  }
+  if (!state) return <TableLoading />
+  if ('error' in state) return <TableError message={state.error} />
+  if (state.rows.length === 0) return <TableEmpty />
+  return <DataTable rows={state.rows} />
+}
 
-  const [header, ...body] = state.rows
+/** Fetches and renders an xlsx's first sheet as a table, inside the existing
+ *  attachment viewer modal. Mirrors CsvTable's shape exactly, but the parsing
+ *  already happened server-side (attachmentTable → the backend's openpyxl
+ *  route) since xlsx is a binary format the browser can't parse from raw
+ *  text the way parseCsv does for CSV. */
+function XlsxTable({ attachment: a }: { attachment: CommentAttachment }) {
+  const [state, setState] = useState<
+    { rows: string[][] } | { error: string } | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    attachmentTable(a).then(({ rows }) => {
+      if (!alive) return
+      setState({ rows: rows.filter(r => r.some(cell => cell.trim() !== '')) })
+    }).catch(() => { if (alive) setState({ error: 'Could not read this file.' }) })
+    return () => { alive = false }
+  }, [a])
+
+  if (!state) return <TableLoading />
+  if ('error' in state) return <TableError message={state.error} />
+  if (state.rows.length === 0) return <TableEmpty />
+  return <DataTable rows={state.rows} />
+}
+
+function TableLoading() {
+  return (
+    <div className="flex h-full items-center justify-center">
+      <Loader2 className="size-5 animate-spin" style={{ color: 'rgba(255,255,255,.6)' }} />
+    </div>
+  )
+}
+
+function TableError({ message }: { message: string }) {
+  return (
+    <p className="p-4 text-center text-[13px]" style={{ color: 'rgba(255,255,255,.75)' }}>
+      {message}
+    </p>
+  )
+}
+
+function TableEmpty() {
+  return (
+    <p className="p-4 text-center text-[13px]" style={{ color: 'rgba(255,255,255,.75)' }}>
+      This file is empty.
+    </p>
+  )
+}
+
+/** Shared table markup for CsvTable and XlsxTable — first row as header, the
+ *  rest as body, truncated past `_CSV_MAX_ROWS` so a real import (thousands
+ *  of rows) doesn't freeze the tab laying out one giant DOM table. */
+function DataTable({ rows }: { rows: string[][] }) {
+  const [header, ...body] = rows
   const truncated = body.length > _CSV_MAX_ROWS
   const shown = truncated ? body.slice(0, _CSV_MAX_ROWS) : body
 
