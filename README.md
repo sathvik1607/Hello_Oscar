@@ -4,6 +4,14 @@ The Oscar personal-assistant, in a browser. A React + TypeScript client for the
 existing **HelloOscar** FastAPI backend — no parallel backend, no reimplemented
 business logic, and the proven browser voice engine reused rather than rewritten.
 
+> **Repo mirrors, updated 2026-10-05.** This repo pushes to TWO remotes: `origin`
+> (`sathvik1607/Hello_Oscar`, original) and `alumnx` (`alumnxcodebase/hello_oscar_web`,
+> added 2026-10-05). Both track `main` and are kept in sync — verify with
+> `git log origin/main..main` / `git log alumnx/main..main` (empty both ways = in sync)
+> before assuming either is stale. `origin/shiva/change` is a known-stale remote branch
+> (no unique commits ahead of `main`, deletes real functionality) — intentionally never
+> pushed to `alumnx`.
+
 ```
 web/          the app (Vite · React 19 · TypeScript · Tailwind v4)
 scripts/      integration smoke tests that run against a live backend
