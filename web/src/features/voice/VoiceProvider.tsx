@@ -122,6 +122,18 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const start = useCallback(async () => {
+    // 🔴 DISABLED — the backend voice feature (/voice/sarvam/*, /voice/gemini/live,
+    // /voice/transcribe, /voice/realtime-token) was removed entirely from the
+    // Oscar backend on 2026-09-30/10-01. Starting the engine below would only
+    // open dead WebSocket/HTTP endpoints. Left commented rather than deleted so
+    // this can be restored in one step if voice comes back — see the backend's
+    // `voice-feature-backup` git branch for the removed server-side code.
+    // if (engine.current?.isRunning || starting.current) return
+    // starting.current = true
+    // setSt(s => ({ ...s, error: null, needsGesture: false }))
+    setSt(s => ({ ...s, error: 'Voice is not available right now.' }))
+    return
+    /* eslint-disable no-unreachable */
     if (engine.current?.isRunning || starting.current) return
     starting.current = true
     setSt(s => ({ ...s, error: null, needsGesture: false }))

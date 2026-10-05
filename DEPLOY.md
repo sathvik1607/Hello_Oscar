@@ -10,6 +10,24 @@
 > (`76ea79e`, `baa2daa`, `d39f7d8`, `722e15c`, `bd4d9c6`) sit on
 > `remove-rfq-from-oscar` and are **not** on any deployed branch — including
 > `X-App-Version`, which the web app's staleness check wants. See `VERCEL.md`.
+>
+> 🔴 **(added 2026-10-02, git-grounded) — this repo moved OFF
+> `developement-branch.onrender.com` already, on 2026-09-02.** `git log -p --
+> web/.env.production` shows `bc4e837` switched `VITE_BACKEND_URL` to
+> `https://alumnxailabs-epa-3.onrender.com`, with the commit message stating
+> `developement-branch.onrender.com` "serves prod and is currently suspended."
+> That value is still what's committed as of `7ccdfce` (2026-09-29, the latest
+> touch to that file). The backend repo's own `CLAUDE.md` separately states its
+> deploy topology changed again on 2026-09-24, naming the same
+> `alumnxailabs-epa-3.onrender.com` host as the `remove-rfq-from-oscar` target —
+> so on paper this repo and the backend repo agree.
+>
+> **But see `VERCEL.md` for an unresolved THIRD claim, from the user directly in
+> this session:** the Flutter app was just submitted to both app stores pointing
+> at `https://hello-oscar-backend.onrender.com` — a hostname absent from this
+> repo's entire git history. Do not assume `alumnxailabs-epa-3.onrender.com` is
+> still correct just because this repo and the backend doc agree on it; resolve
+> the discrepancy in `VERCEL.md` first.
 
 Everything is committed and verified. One command is yours to run, because
 `sathvik1607` is pull-only on `cbunny-2005/checking`:

@@ -2,7 +2,60 @@
 
 ## Live
 
-  https://hellooscarweb.vercel.app  →  https://developement-branch.onrender.com
+  https://hellooscarweb.vercel.app  →  https://alumnxailabs-epa-3.onrender.com
+  *(corrected 2026-10-02 — see the three-way discrepancy flagged below;
+  previously this line said `developement-branch.onrender.com`, which was stale)*
+
+🔴 **This repo DOES commit a backend hostname — in `web/.env.production`, not in
+`vercel.json` or any doc — and it is currently `alumnxailabs-epa-3.onrender.com`,
+set by commit `176f34b` ("build: production env pointing at the Flutter app's
+backend") and last touched by `7ccdfce` (2026-09-29, adding Firebase push vars,
+URL unchanged).** `git log -p -- web/.env.production` shows the file migrated
+`developement-branch.onrender.com` → `alumnxailabs-epa-3.onrender.com` in
+`bc4e837` (2026-09-02), whose commit message states plainly: *"the previous
+target, developement-branch.onrender.com, serves prod and is currently
+suspended"* and *".env.production points at the backend that is actually up."*
+The file's own inline comment also records that `epa-3` runs against the
+**dev database** (`oscar_dev`), not `cohort_main` prod, and that user ids differ
+between the two (e.g. Vijender is 45 on dev, 4 on prod).
+
+⚠️ **Caveat baked into the same file (unchanged since):** *"On a VERCEL build the
+dashboard's own `VITE_BACKEND_URL` wins over this file."* So `.env.production` is
+what a **local** `npm run build` produces — it is evidence of intent, not proof of
+what the live Vercel deployment actually calls. **NOT VERIFIED 2026-10-02 —
+Vercel dashboard/CLI not accessible in this session** to confirm the Production
+environment variable matches this file.
+
+🔴🔴 **THREE-WAY DISCREPANCY, flagged 2026-10-02, not resolved here:**
+1. This repo's committed `web/.env.production` (as of `7ccdfce`, 2026-09-29) →
+   `https://alumnxailabs-epa-3.onrender.com`, **against the dev DB** per its own
+   comment.
+2. The backend repo's `CLAUDE.md` and the cross-repo `OscarDocs/INTEGRATION.md`
+   (v3.0.0, 2026-10-02) also name `alumnxailabs-epa-3.onrender.com` as the current
+   production target for `remove-rfq-from-oscar` — but the backend doc itself
+   says this is "owner-confirmed via dashboard, not yet machine-verified via a
+   live Render API call," and separately flags that `epa-3`'s database role
+   "changed" recently and is "NOT YET RE-VERIFIED."
+3. **Per the user directly (2026-10-02, this session):** the Flutter mobile app
+   was just submitted to both the Play Store and the App Store pointing at
+   **`https://hello-oscar-backend.onrender.com`** — a hostname that appears
+   **nowhere** in this repo's git history (`git log --all -p | grep -i
+   "hello-oscar-backend"` returns nothing) and nowhere in the backend repo's
+   `CLAUDE.md` excerpts reviewed either.
+
+**What this means concretely:** if `hello-oscar-backend.onrender.com` is genuinely
+what mobile now ships against, and this web app's committed/deployed config still
+points at `alumnxailabs-epa-3.onrender.com` against the **dev** database, then
+*the web app and the just-submitted mobile app are talking to two different
+backends and almost certainly two different databases* — meaning a task created
+in the web app would be invisible on mobile and vice versa. This is exactly the
+cross-device realtime assumption `.env.production`'s own comment calls load-
+bearing ("WebSocket state is process-local, so a task created on the phone only
+reaches a browser connected to the SAME process"). **This needs a human decision,
+not a docs fix** — resolve which backend is actually current (custom domain /
+rename of the same Render service vs. a genuinely different one) before trusting
+any of the three URLs above, and update `web/.env.production` + the Vercel
+dashboard together once that's settled.
 
 The project is owned in Vercel and deploys on push to `main`. `VITE_BACKEND_URL` is
 set in the project's Environment Variables and is **baked into the bundle at build

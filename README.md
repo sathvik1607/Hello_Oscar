@@ -124,6 +124,15 @@ cd web && npm run typecheck && npm run lint && npm run build
 
 Everything. The backend was not modified except to add authentication.
 
+*(note added 2026-10-02)* **Web push is a client-only addition, not a backend
+reuse** — `7ccdfce` (2026-09-29) adds Firebase web push (`web/public/firebase-
+messaging-sw.js`, a service worker), a foreground notification sound, and in-app
+toasts. This still rides the existing `POST /devices/register` /
+`/devices/token` contract (see backend `CLAUDE.md` FCM section) — verified in
+`web/src/lib/push.ts` and `api.ts`: it sends `platform: "web"`, a free-form
+string the backend's `pa_device_tokens.platform` column already accepts
+alongside `"ios"`/`"android"`.
+
 | | |
 |---|---|
 | Auth | `POST /auth/login` (+ a `token` field, additive) |
@@ -133,6 +142,8 @@ Everything. The backend was not modified except to add authentication.
 | Chat | `/chat/stream`, `/chat`, `/chat/sessions*` |
 | Notes | `/users/{uid}/notes`, `/notes/{id}`, `/notes/plan-day` |
 | Team | `/teams/{id}/members`, `/teams/{id}/tasks?project=true` |
+| Messaging *(added 2026-10-02 — shipped `d64ae85`, 2026-08-21, previously missing from this table)* | `/teams/{id}/messages`, `/teams/{id}/messages/read`, `/users/{uid}/direct/{peer}/messages`, `.../read` |
+| Attachments *(added 2026-10-02 — shipped `c6802e3` and the attachment-preview commits through `3900d12`, 2026-09-29)* | `/users/{uid}/tasks/{tid}/attachments`, `/tasks/attachments/{id}` |
 | Activity | `/notifications/{uid}`, `.../read`, `.../read-all` |
 | Assistant | `/assistant/suggestions`, `/assistant/business` |
 | Realtime | `WS /ws` — `chat.thinking/delta/tool/complete`, `notification.created`, `task.comment.created` |
@@ -167,14 +178,23 @@ also mean rewriting the working pipeline, so it is documented rather than attemp
 
 ## Known limits
 
+*(updated 2026-10-02 — reconciled against `web/src/features/` and `git log`; two
+items below were stale and have been corrected, grounded in the commits cited)*
+
 * **No registration.** All three backend registration paths need a gate code that a
   public page should not collect. Accounts are created by an administrator.
 * **No image attachments in chat.** The endpoints exist; the UI does not use them.
   Oscar does not read images anyway (vision is removed, not disabled).
-* **No team/direct messaging UI.** `pa_team_messages` and `pa_direct_messages` are
-  fully built server-side and unused here.
-* **`/calendar/free-slots` is a backend stub** returning `[]`, which is why Calendar
-  is an agenda rather than a free-space finder.
+* ~~No team/direct messaging UI~~ **WRONG as of `d64ae85` (2026-08-21) — FIXED, not
+  a current limit** *(corrected 2026-10-02)*. `web/src/features/messages/` ships
+  team group chat + 1-on-1 DMs, with `@mention` tagging (`edd0e61`) and former-member
+  name resolution (`1f4cd93`, `5dcbf1d`); it is routed live from `App.tsx` under the
+  `messages` section. This line was left over from before that feature landed and
+  should not have survived the 2026-09-02 doc pass.
+* **`/calendar/free-slots` is a backend stub** returning `[]`; the web app does not
+  rely on it — `AvailabilityTab.tsx` instead derives free/busy slots from real
+  meetings plus a client-persisted custom-availability set (`9a17aab`, `1bcd611`,
+  2026-09-26), not the stub.
 * **Chat history is server-only** — no offline cache, so the transcript needs a
   connection. The mobile client keeps a local copy; this does not.
 * **`is_overdue` is re-checked client-side**, via `isOverdue()` in `lib/format.ts`,
